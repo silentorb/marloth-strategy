@@ -13,9 +13,14 @@
 
 | Path | Purpose |
 |------|---------|
-| [`src/MarlothStrategy/`](../../src/MarlothStrategy/) | Console prototype entry and game code |
+| [`src/MarlothStrategy.Simulation/`](../../src/MarlothStrategy.Simulation/) | Authoritative game logic/state; shared by console and (later) Godot surfaces. No console I/O. Hosts host-supplied config types such as `GameConfig`. |
+| [`src/MarlothStrategy.Console.Client/`](../../src/MarlothStrategy.Console.Client/) | ASCII presentation / input; depends on Simulation |
+| [`src/MarlothStrategy.Console.App/`](../../src/MarlothStrategy.Console.App/) | Thin console host: build config, call Client. Not game rules |
 | [`MarlothStrategy.sln`](../../MarlothStrategy.sln) | Solution |
+| [`Directory.Build.props`](../../Directory.Build.props) | Shared MSBuild defaults (`net8.0`, nullable, implicit usings) |
 | [`docs/`](../) | Design and technical source of truth |
 | `tests/` | Not present yet; add when introducing automated tests |
+
+**Dependencies:** Console.App → Console.Client → Simulation; Console.App also references Simulation so it can construct `GameConfig` and pass it into Client. A future Godot App/Client will reuse Simulation the same way.
 
 Godot-oriented directory layout (assets, scenes, ui, etc.) will be documented here when that surface exists.

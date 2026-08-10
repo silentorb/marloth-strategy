@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>MarlothStrategy.Console.Client</RootNamespace>
+    <AssemblyName>MarlothStrategy.Console.Client</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MarlothStrategy.Simulation\MarlothStrategy.Simulation.csproj" />
+  </ItemGroup>
+
+</Project>

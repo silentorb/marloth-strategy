@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>MarlothStrategy.Simulation</RootNamespace>
+    <AssemblyName>MarlothStrategy.Simulation</AssemblyName>
+  </PropertyGroup>
+
+</Project>

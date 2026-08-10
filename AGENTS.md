@@ -15,10 +15,10 @@
 ## Entry
 
 ```bash
-dotnet run --project src/MarlothStrategy
+dotnet run --project src/MarlothStrategy.Console.App
 ```
 
-Solution: [`MarlothStrategy.sln`](MarlothStrategy.sln).
+Solution: [`MarlothStrategy.sln`](MarlothStrategy.sln). Projects: `MarlothStrategy.Console.App` (exe host), `MarlothStrategy.Console.Client` (ASCII presentation), `MarlothStrategy.Simulation` (shared game logic).
 
 ## Conventions
 
