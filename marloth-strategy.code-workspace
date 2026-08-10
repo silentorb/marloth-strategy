@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"name": "marloth-strategy",
+			"path": "."
+		},
+		{
+			"name": "minimap",
+			"path": "../minimap"
+		}
+	],
+	"settings": {}
+}

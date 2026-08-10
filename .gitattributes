@@ -1,0 +1,13 @@
+# Normalize EOL for all files that Git considers text files.
+* text=auto eol=lf
+
+# Common text types (explicit so Git always treats them as LF text, not binary)
+*.cs text eol=lf
+*.csproj text eol=lf
+*.sln text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.props text eol=lf
+*.targets text eol=lf
+*.sh text eol=lf
+*.py text eol=lf
