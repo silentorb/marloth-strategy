@@ -1,0 +1,23 @@
+---
+description: On bug fixes, add a regression test when sound; escalate instead of brittle or flaky coverage
+alwaysApply: true
+---
+
+# Bug-driven regression testing
+
+When fixing a **user-reported bug** that the current suite did not catch, treat a regression test as part of the fix—unless a sound test is not feasible.
+
+## Workflow
+
+1. Confirm whether an existing test **should** have failed for this bug.
+2. If not, add a **failing test first** at the **lowest layer** that can reproduce it (unit → simulation functional → client, as those layers exist).
+3. Fix the product code; keep the test green.
+4. Prefer asserting **documented** behavior ([docs/technical/technical-design.md](docs/technical/technical-design.md), feature docs). If the report itself defines missing behavior, update the docs in the same change and test against that.
+
+## Escalate instead of a bad test
+
+**Do not** invent coverage that needs heavy hacking, new general harnesses you were not asked to build, or that is likely brittle, flaky, hanging, or non-deterministic.
+
+Stop and explain trade-offs to the user; wait for direction to skip the test, expand testing capabilities, or redesign for testability.
+
+Full detail: [docs/technical/features/platform/testing.md](docs/technical/features/platform/testing.md) (**Bug regressions / debugging**).

@@ -1,0 +1,12 @@
+# Game feature docs (read on demand)
+
+**Features index** for Marloth Strategy. **Source of truth** for design, feel, and player-facing rules beyond the high-level notes in [game-design.md](../game-design.md). **Do not** open every file for general engineering tasks.
+
+Feature docs may later be grouped under `ui/`, `gameplay/`, `session/`, and similar folders.
+
+1. Skim the **trigger** lines below.
+2. If a trigger matches your current task, read **only** that markdown file.
+
+| File | Read when… |
+|------|------------|
+| [../game-design.md](../game-design.md) | Reading **gameplay vision**, genre, or surface (console vs Godot). **Do not edit** unless the user explicitly instructed changes to that file. |

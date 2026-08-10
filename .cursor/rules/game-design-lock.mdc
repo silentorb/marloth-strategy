@@ -1,0 +1,12 @@
+---
+description: Do not edit docs/game/game-design.md without explicit user instruction
+alwaysApply: true
+---
+
+# Game design doc lock
+
+[`docs/game/game-design.md`](docs/game/game-design.md) holds Marloth Strategy’s high-level vision.
+
+- Do **not** create, edit, or delete that file unless the **user explicitly instructed** changes to it in the current conversation.
+- Put secondary design and player-facing rules in [`docs/game/features/`](docs/game/features/) (see the [features index](docs/game/features/README.md)).
+- Reading the file is fine; proposing or applying unsolicited edits is not.

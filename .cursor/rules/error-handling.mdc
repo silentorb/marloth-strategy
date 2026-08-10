@@ -1,0 +1,22 @@
+---
+description: Prefer explicit error flows; exceptions only for truly exceptional or documented abort boundaries
+alwaysApply: true
+---
+
+# Error handling
+
+For any code path longer than a line or two, choose a deliberate failure strategy before implementing.
+
+## Rules of thumb
+
+1. Prefer **explicit outcomes** (`Try*`, local Ok/Error types, validated returns) for **expected** failure modes.
+2. Use **exceptions** only for **truly exceptional** cases: programmer invariants, impossible state, or a documented **fail-fast abort** boundary where recovery is not defined.
+
+## Requirements
+
+- Do **not** swallow failures (empty `catch`, silent defaults that look like success).
+- Do **not** leave half-initialized interactive state when multi-step setup fails.
+- Prefer a single catch/abort boundary for boot/entry paths that must exit, not scattered uncaught throws.
+- Match layer norms in the feature doc; do not invent a shared `Result<T>` library unless design explicitly adds one.
+
+Full detail: [docs/technical/features/platform/error-handling.md](docs/technical/features/platform/error-handling.md).

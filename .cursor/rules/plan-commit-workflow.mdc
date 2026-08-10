@@ -1,0 +1,96 @@
+---
+description: Include Testing and Commit strategy sections in every Cursor plan; defer commits until user explicitly requests
+alwaysApply: true
+---
+
+# Plan commit workflow
+
+When creating or updating a plan, include a dedicated **Testing** section, a **Commit strategy** section, and a final **commit-await-approval** todo. Do not auto-commit when implementation finishes.
+
+## Testing section (required)
+
+Every plan must include at least one dedicated `## Testing` section (same class of requirement as Commit strategy). Cover:
+
+- What will be tested and at which layer (unit / simulation functional / client) as applicable
+- What is out of scope for automated tests
+- A short fallout / regression run note after implementation
+
+Doc-only or pure-config plans still need a short Testing section (e.g. “no automated tests; manual check …” or “link updates only”).
+
+## Workspace git layout
+
+This project is the **marloth-strategy** git repo (toplevel `/workspaces/marloth-strategy` when opened alone). A multi-root workspace may also include sibling repos (e.g. minimap); run baseline and commit git commands in **each affected repo**. Do not assume a single-repo workspace.
+
+## 1. Baseline snapshot
+
+In each git repo that may be affected, run read-only git commands and record results in a Commit strategy section:
+
+- `git status --short`
+- `git diff`
+- `git diff --staged` (if anything is staged)
+- `git log -3 --oneline`
+
+## 2. Classify dirty files
+
+Label each changed path:
+
+- **Pre-existing** — dirty before this plan
+- **Plan-scoped** — will change during implementation
+- **Unrelated** — out of scope; exclude from plan commits
+
+Include related pre-existing changes in the same per-repo commit. For unrelated dirty files, note "exclude" or ask before mixing.
+
+## 3. Per-repo commit plan
+
+Default: **one commit per affected repo** (not one squashed commit across repos).
+
+For each affected repo specify:
+
+- files to include
+- files to exclude
+- draft commit message (1–2 sentences, why not what; match recent `git log` style)
+
+## 4. Final todo (always last)
+
+Add a plan frontmatter / todo item `commit-await-approval` as the **last** item:
+
+> **Commit (await user approval)** — After implementation and verification, re-run git status/diff per repo, reconcile with this strategy, commit only when the user explicitly requests it.
+
+Keep it **pending** during planning and implementation unless the user asks to commit.
+
+## 5. Commit strategy section template
+
+Use this shape:
+
+```markdown
+## Commit strategy
+
+### Baseline (plan created)
+
+- marloth-strategy: clean | dirty — list pre-existing files
+
+### Intended commits
+
+#### marloth-strategy
+
+- Include: …
+- Exclude: …
+- Draft message: "…"
+
+### User trigger
+
+Say **commit** (or **commit per the plan**) after review.
+```
+
+If additional git repos are affected, add a baseline bullet and an Intended commits subsection for each; keep one commit per repo.
+
+## Commit execution
+
+Only when the user explicitly says "commit" / "go ahead and commit" / "commit per the plan":
+
+1. Re-snapshot git state in each affected repo.
+2. Compare to the plan; if scope differs materially, pause and confirm.
+3. Follow the Git Safety Protocol: status + diff + log in parallel, stage only planned files, HEREDOC message, verify after.
+4. Repeat per affected repo. Never force-push or amend unless user rules allow.
+
+Do **not** auto-commit when implementation finishes.
