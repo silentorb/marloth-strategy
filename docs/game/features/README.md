@@ -10,3 +10,4 @@ Feature docs may later be grouped under `ui/`, `gameplay/`, `session/`, and simi
 | File | Read when… |
 |------|------------|
 | [../game-design.md](../game-design.md) | Reading **gameplay vision**, genre, or surface (console vs Godot). **Do not edit** unless the user explicitly instructed changes to that file. |
+| [gameplay/production-flows.md](gameplay/production-flows.md) | Designing or changing **production flows**, actions, resources/signals, **actors**, **assignment**, circular configs, or the magic-agency seed. |

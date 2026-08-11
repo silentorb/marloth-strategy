@@ -19,7 +19,7 @@
 | [`MarlothStrategy.sln`](../../MarlothStrategy.sln) | Solution |
 | [`Directory.Build.props`](../../Directory.Build.props) | Shared MSBuild defaults (`net8.0`, nullable, implicit usings) |
 | [`docs/`](../) | Design and technical source of truth |
-| `tests/` | Not present yet; add when introducing automated tests |
+| [`tests/`](../../tests/) | Automated tests (starts with Simulation unit tests) |
 
 **Dependencies:** Console.App → Console.Client → Simulation; Console.App also references Simulation so it can construct `GameConfig` and pass it into Client. A future Godot App/Client will reuse Simulation the same way.
 

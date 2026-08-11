@@ -11,5 +11,6 @@ Feature docs may later be grouped under `ui/`, `gameplay/`, `session/`, and `pla
 |------|------------|
 | [platform/error-handling.md](platform/error-handling.md) | Adding or changing **APIs**, loaders, boot paths, or any **multi-step** logic where failures must be chosen (throw vs explicit outcome vs abort). |
 | [platform/testing.md](platform/testing.md) | Working on **automated tests**, test layout, or **bug-driven regression** policy (failing test first / escalate brittle coverage). |
+| [gameplay/production-simulation.md](gameplay/production-simulation.md) | Changing **production graph** types, port signals, **AdvanceTick** phases, effort/assignment math, or magic-agency seed factories in Simulation. |
 | [../technical-design.md](../technical-design.md) | **Architecture**, docs-as-SoT, console vs eventual Godot, TDD, or repository layout. |
 | [../../game/game-design.md](../../game/game-design.md) | Reading **gameplay vision**, genre, or surface (console vs Godot). **Do not edit** unless the user explicitly instructed changes to that file. |

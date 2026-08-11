@@ -2,17 +2,23 @@
 
 ## Status
 
-There is **no** `tests/` tree yet. When tests are introduced, prefer this layering and keep this document current.
+The suite starts with **unit** tests on Simulation.
 
-## Intended layers (when the suite exists)
+| Project | Layer | Framework |
+|---------|-------|-----------|
+| [`tests/MarlothStrategy.Simulation.Tests/`](../../../../tests/MarlothStrategy.Simulation.Tests/) | Unit | xUnit |
+
+```bash
+dotnet test
+```
+
+## Intended layers
 
 | Layer | Purpose |
 |-------|---------|
 | **Unit** | Fast, engine-agnostic tests of pure logic and small APIs. |
 | **Simulation functional** | Broader game-logic journeys without a Godot runtime (console / headless sim). |
 | **Client** (later) | Godot or other presentation-layer tests when that surface exists. |
-
-Framework choice (e.g. xUnit) should match what the first test project introduces; document commands here when they exist.
 
 ## Principles
 
