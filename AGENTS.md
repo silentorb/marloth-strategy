@@ -18,7 +18,18 @@
 dotnet run --project src/MarlothStrategy.Console.App
 ```
 
+Play from the IDE: Run/F5 configuration **Marloth Strategy (Console)** (`.vscode/launch.json` → `dotnet run` in the integrated terminal; no C# debugger). Same label exists as a **Run Task**. That is for playing the prototype, not human debugging.
+
 Solution: [`MarlothStrategy.sln`](MarlothStrategy.sln). Projects: `MarlothStrategy.Console.App` (exe host), `MarlothStrategy.Console.Client` (ASCII presentation), `MarlothStrategy.Simulation` (shared game logic).
+
+## Debugging
+
+Users **play** and report bugs; they do **not** step through a debugger. **100% of debugging is agent work.**
+
+- Expect reports from play sessions (symptoms, approximate tick/actions, expected vs actual).
+- Reproduce with `dotnet test`, targeted unit coverage, and non-interactive console smoke when the session loop matters, e.g. `printf '\n\nq\n' | dotnet run --project src/MarlothStrategy.Console.App`.
+- Prefer a failing regression test at the lowest sound layer before fixing ([bug-regression-tests](.cursor/rules/bug-regression-tests.mdc), [testing.md](docs/technical/features/platform/testing.md)).
+- Do not assume the user will attach a debugger, set breakpoints, or interpret call stacks.
 
 ## Conventions
 

@@ -8,27 +8,42 @@ public static class ProductionTick
     public const decimal BaseThroughput = 2m;
 
     public static GameState AdvanceTick(GameState state) =>
-        AdvanceTick(state, OrderNodes(state.Graph.Nodes.Keys));
+        AdvanceTickWithReport(state).State;
+
+    public static GameState AdvanceTick(GameState state, IEnumerable<NodeId> nodeOrder) =>
+        AdvanceTickWithReport(state, nodeOrder).State;
+
+    public static ProductionTickResult AdvanceTickWithReport(GameState state) =>
+        AdvanceTickWithReport(state, OrderNodes(state.Graph.Nodes.Keys));
 
     /// <summary>
-    /// Advances one production tick. <paramref name="nodeOrder"/> only affects iteration order;
-    /// results must be identical for any permutation of the same nodes.
+    /// Advances one production tick and returns per-node I/O. <paramref name="nodeOrder"/> only
+    /// affects iteration order; results must be identical for any permutation of the same nodes.
     /// </summary>
-    public static GameState AdvanceTick(GameState state, IEnumerable<NodeId> nodeOrder)
+    public static ProductionTickResult AdvanceTickWithReport(
+        GameState state,
+        IEnumerable<NodeId> nodeOrder)
     {
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(nodeOrder);
 
+        var orderedNodes = nodeOrder as IReadOnlyList<NodeId> ?? nodeOrder.ToArray();
         var effortByNode = ResolveEffortByNode(state);
-        var resolvedInputs = ResolveInputs(state, nodeOrder);
-        var (residuals, outputs) = ComputeOutputs(state, nodeOrder, resolvedInputs, effortByNode);
+        var resolvedInputs = ResolveInputs(state, orderedNodes);
+        var (residuals, outputs, rows) = ComputeOutputs(
+            state,
+            orderedNodes,
+            resolvedInputs,
+            effortByNode);
         var nextSignals = CommitSignals(state, residuals, outputs);
 
-        return state with
+        var nextState = state with
         {
             PortSignals = nextSignals,
             Tick = state.Tick + 1,
         };
+
+        return new ProductionTickResult(nextState, rows);
     }
 
     public static ImmutableDictionary<NodeId, decimal> ResolveEffortByNode(GameState state)
@@ -91,7 +106,8 @@ public static class ProductionTick
 
     private static (
         ImmutableDictionary<PortKey, SignalValue> Residuals,
-        ImmutableDictionary<PortKey, SignalValue> Outputs) ComputeOutputs(
+        ImmutableDictionary<PortKey, SignalValue> Outputs,
+        ImmutableArray<NodeIoRow> Rows) ComputeOutputs(
         GameState state,
         IEnumerable<NodeId> nodeOrder,
         ImmutableDictionary<PortKey, SignalValue> resolvedInputs,
@@ -99,6 +115,7 @@ public static class ProductionTick
     {
         var residuals = ImmutableDictionary.CreateBuilder<PortKey, SignalValue>();
         var outputs = ImmutableDictionary.CreateBuilder<PortKey, SignalValue>();
+        var rows = ImmutableArray.CreateBuilder<NodeIoRow>();
 
         foreach (var nodeId in nodeOrder)
         {
@@ -130,9 +147,20 @@ public static class ProductionTick
             var residualAmount = available - processed;
             residuals[inputKey] = CreateSignal(inputPort.Type.Id, residualAmount);
             outputs[outputKey] = CreateSignal(outputPort.Type.Id, processed);
+            rows.Add(new NodeIoRow(
+                nodeId,
+                effort,
+                inputPort.Id,
+                inputPort.Type.Id,
+                available,
+                processed,
+                residualAmount,
+                outputPort.Id,
+                outputPort.Type.Id,
+                processed));
         }
 
-        return (residuals.ToImmutable(), outputs.ToImmutable());
+        return (residuals.ToImmutable(), outputs.ToImmutable(), rows.ToImmutable());
     }
 
     private static ImmutableDictionary<PortKey, SignalValue> CommitSignals(

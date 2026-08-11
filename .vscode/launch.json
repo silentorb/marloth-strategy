@@ -1,0 +1,12 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Marloth Strategy (Console)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "dotnet run --project src/MarlothStrategy.Console.App/MarlothStrategy.Console.App.csproj",
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}

@@ -54,7 +54,13 @@ Public API (pure):
 
 ```csharp
 GameState AdvanceTick(GameState state);
+ProductionTickResult AdvanceTickWithReport(GameState state);
+// AdvanceTick(state) => AdvanceTickWithReport(state).State;
 ```
+
+`ProductionTickResult` carries the next `GameState` plus `ImmutableArray<NodeIoRow> Nodes` (one row per node, same order as tick iteration). Each `NodeIoRow` (v1: exactly one input and one output per node type) includes: `NodeId`, `Effort`, input port / signal type / `Available` / `Consumed` / `Residual`, output port / signal type / `Produced`.
+
+Stock diffs alone are not a substitute for the report under cycles (net stocks can be unchanged while nodes still process).
 
 Pipeline (each step returns new data; no mutation of prior state):
 
@@ -68,6 +74,7 @@ Host pattern:
 ```csharp
 GameState state = MagicAgencySeed.CreateInitialState();
 state = AdvanceTick(state); // mutable binding, immutable values
+// or: var result = AdvanceTickWithReport(state); state = result.State;
 ```
 
 ## Magic agency seed
@@ -96,5 +103,6 @@ Seed and tick assume a well-formed graph for v1 (programmer invariants). Malform
 | Topic | Document |
 |-------|----------|
 | Player-facing production rules | [Production flows](../../../game/features/gameplay/production-flows.md) |
+| Console session / I/O table | [Console client](../ui/console-client.md) |
 | Error handling policy | [Error handling](../platform/error-handling.md) |
 | Tests | [Testing](../platform/testing.md) |

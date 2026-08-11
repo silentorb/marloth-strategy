@@ -7,6 +7,7 @@ The suite starts with **unit** tests on Simulation.
 | Project | Layer | Framework |
 |---------|-------|-----------|
 | [`tests/MarlothStrategy.Simulation.Tests/`](../../../../tests/MarlothStrategy.Simulation.Tests/) | Unit | xUnit |
+| [`tests/MarlothStrategy.Console.Client.Tests/`](../../../../tests/MarlothStrategy.Console.Client.Tests/) | Unit (console presentation) | xUnit |
 
 ```bash
 dotnet test
@@ -18,7 +19,7 @@ dotnet test
 |-------|---------|
 | **Unit** | Fast, engine-agnostic tests of pure logic and small APIs. |
 | **Simulation functional** | Broader game-logic journeys without a Godot runtime (console / headless sim). |
-| **Client** (later) | Godot or other presentation-layer tests when that surface exists. |
+| **Client** | Console presentation unit tests now; Godot presentation tests when that surface exists. |
 
 ## Principles
 
@@ -29,6 +30,8 @@ dotnet test
 ## Bug regressions / debugging
 
 Debugging should be as test-driven as practical. When a **user-reported bug** was not caught by the suite, a regression test is part of the fix—unless a sound test is not available.
+
+Humans play and report bugs; they do **not** attach a debugger. **Agents** reproduce and fix (see [AGENTS.md](../../../../AGENTS.md) **Debugging**): `dotnet test`, targeted coverage, and piped `dotnet run` smoke when the console session matters.
 
 ### Workflow
 

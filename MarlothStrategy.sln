@@ -12,6 +12,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{41574509
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MarlothStrategy.Simulation.Tests", "tests\MarlothStrategy.Simulation.Tests\MarlothStrategy.Simulation.Tests.csproj", "{D98EB839-3E83-4CBA-B887-E95A00AE4E16}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MarlothStrategy.Console.Client.Tests", "tests\MarlothStrategy.Console.Client.Tests\MarlothStrategy.Console.Client.Tests.csproj", "{D98EB839-3E83-4CBA-B887-E95A00AE4E17}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -34,8 +36,14 @@ Global
 		{D98EB839-3E83-4CBA-B887-E95A00AE4E16}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{D98EB839-3E83-4CBA-B887-E95A00AE4E16}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{D98EB839-3E83-4CBA-B887-E95A00AE4E16}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D98EB839-3E83-4CBA-B887-E95A00AE4E17}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D98EB839-3E83-4CBA-B887-E95A00AE4E17}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D98EB839-3E83-4CBA-B887-E95A00AE4E17}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D98EB839-3E83-4CBA-B887-E95A00AE4E17}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{D98EB839-3E83-4CBA-B887-E95A00AE4E16} = {41574509-CCF3-4B17-960F-070048ABD7CA}
+		{D98EB839-3E83-4CBA-B887-E95A00AE4E17} = {41574509-CCF3-4B17-960F-070048ABD7CA}
 	EndGlobalSection
 EndGlobal
+
