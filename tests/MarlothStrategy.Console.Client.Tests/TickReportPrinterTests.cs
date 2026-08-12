@@ -6,10 +6,18 @@ namespace MarlothStrategy.Console.Client.Tests;
 
 public sealed class TickReportPrinterTests
 {
+    private static readonly NodeTypeConfigs DefaultConfigs = new(
+        new EnchantNodeConfig(
+            BaseThroughput: 20,
+            VolumeDelta: 10,
+            DarknessDelta: 1,
+            FallacyConstant: 1),
+        new SellNodeConfig(BaseThroughput: 20, PayoutFloor: 0));
+
     [Fact]
     public void FormatStartingStocks_IncludesTickAndPortSignals()
     {
-        var state = MagicAgencySeed.CreateInitialState();
+        var state = MagicAgencySeed.CreateInitialState(DefaultConfigs);
         var text = TickReportPrinter.FormatStartingStocks(state);
 
         Assert.Contains("Starting stocks (tick 0)", text);
@@ -21,7 +29,7 @@ public sealed class TickReportPrinterTests
     public void FormatTickReport_IncludesHeaderAndNodeIoCells()
     {
         var result = new ProductionTickResult(
-            MagicAgencySeed.CreateInitialState() with { Tick = 1 },
+            MagicAgencySeed.CreateInitialState(DefaultConfigs) with { Tick = 1 },
             ImmutableArray.Create(
                 new NodeIoRow(
                     MagicAgencySeed.EnchantNodeId,
@@ -62,5 +70,14 @@ public sealed class TickReportPrinterTests
         Assert.Contains("0.5", text);
         Assert.Contains("yes", text);
         Assert.Contains("no", text);
+    }
+
+    [Fact]
+    public void FormatSignal_RoundsNonIntegerNumerics()
+    {
+        Assert.Equal("11", TickReportPrinter.FormatSignal(new SignalValue.Money(10.6)));
+        Assert.Equal(
+            "11/2/4",
+            TickReportPrinter.FormatSignal(new SignalValue.Enchantment(10.5, 1.6, 3.5)));
     }
 }

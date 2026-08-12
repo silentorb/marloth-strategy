@@ -5,8 +5,6 @@ namespace MarlothStrategy.Simulation.Production;
 
 public static class ProductionTick
 {
-    public const int BaseThroughput = 20;
-
     public static GameState AdvanceTick(GameState state) =>
         AdvanceTickWithReport(state).State;
 
@@ -122,13 +120,15 @@ public static class ProductionTick
             var node = state.Graph.Nodes[nodeId];
             var nodeType = state.Catalog.Get(node.Type);
             var effort = effortByNode.GetValueOrDefault(nodeId, 0m);
-            var limit = (int)decimal.Floor(BaseThroughput * effort);
 
             if (node.Type == MagicAgencySeed.EnchantTypeId)
             {
+                var enchantConfig = state.NodeConfigs.Enchant;
+                var limit = ProcessLimit(enchantConfig.BaseThroughput, effort);
                 rows.Add(ComputeEnchant(
                     nodeId,
                     nodeType,
+                    enchantConfig,
                     effort,
                     limit,
                     resolvedInputs,
@@ -137,9 +137,12 @@ public static class ProductionTick
             }
             else if (node.Type == MagicAgencySeed.SellTypeId)
             {
+                var sellConfig = state.NodeConfigs.Sell;
+                var limit = ProcessLimit(sellConfig.BaseThroughput, effort);
                 rows.Add(ComputeSell(
                     nodeId,
                     nodeType,
+                    sellConfig,
                     effort,
                     limit,
                     resolvedInputs,
@@ -155,9 +158,13 @@ public static class ProductionTick
         return (residuals.ToImmutable(), outputs.ToImmutable(), rows.ToImmutable());
     }
 
+    private static int ProcessLimit(double baseThroughput, decimal effort) =>
+        (int)decimal.Floor((decimal)baseThroughput * effort);
+
     private static NodeIoRow ComputeEnchant(
         NodeId nodeId,
         NodeType nodeType,
+        EnchantNodeConfig config,
         decimal effort,
         int limit,
         ImmutableDictionary<PortKey, SignalValue> resolvedInputs,
@@ -191,7 +198,7 @@ public static class ProductionTick
 
         if (canRun && available is SignalValue.Enchantment enchantment)
         {
-            produced = enchantment.Mutate();
+            produced = enchantment.Mutate(config);
             residual = null;
             outputs[outputKey] = produced;
         }
@@ -217,6 +224,7 @@ public static class ProductionTick
     private static NodeIoRow ComputeSell(
         NodeId nodeId,
         NodeType nodeType,
+        SellNodeConfig config,
         decimal effort,
         int limit,
         ImmutableDictionary<PortKey, SignalValue> resolvedInputs,
@@ -242,7 +250,7 @@ public static class ProductionTick
 
         if (canRun && available is SignalValue.Enchantment enchantment)
         {
-            produced = new SignalValue.Money(enchantment.SellPayout());
+            produced = new SignalValue.Money(enchantment.SellPayout(config));
             residual = null;
             outputs[outputKey] = produced;
         }

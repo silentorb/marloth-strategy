@@ -9,4 +9,5 @@ public sealed record GameState(
     ImmutableDictionary<PortKey, SignalValue> PortSignals,
     ImmutableDictionary<ActorId, Actor> Actors,
     ImmutableArray<Assignment> Assignments,
+    NodeTypeConfigs NodeConfigs,
     int Tick);

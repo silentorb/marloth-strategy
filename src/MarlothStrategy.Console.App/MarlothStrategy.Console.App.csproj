@@ -11,4 +11,10 @@
     <ProjectReference Include="..\MarlothStrategy.Simulation\MarlothStrategy.Simulation.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="..\MarlothStrategy.Simulation\config\**\*.json"
+             Link="config\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

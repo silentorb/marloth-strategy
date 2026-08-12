@@ -16,8 +16,13 @@ public static class MagicAgencySeed
     public static readonly PortId MoneyPortId = new("money");
     public static readonly PortId EnchantmentPortId = new("enchantment");
 
-    public static GameState CreateInitialState()
+    public static GameState CreateInitialState() =>
+        CreateInitialState(NodeTypeConfigLoader.LoadFromBaseDirectory());
+
+    public static GameState CreateInitialState(NodeTypeConfigs nodeConfigs)
     {
+        ArgumentNullException.ThrowIfNull(nodeConfigs);
+
         var moneyType = new SignalType(SignalTypes.Money);
         var enchantmentType = new SignalType(SignalTypes.Enchantment);
 
@@ -87,6 +92,7 @@ public static class MagicAgencySeed
             signals,
             actors,
             assignments,
+            nodeConfigs,
             Tick: 0);
     }
 }

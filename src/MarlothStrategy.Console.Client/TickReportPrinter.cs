@@ -46,11 +46,14 @@ public static class TickReportPrinter
     public static string FormatSignal(SignalValue? value) => value switch
     {
         null => "-",
-        SignalValue.Money m => m.Amount.ToString(CultureInfo.InvariantCulture),
+        SignalValue.Money m => FormatRounded(m.Amount),
         SignalValue.Enchantment e =>
-            $"{e.Volume}/{e.Darkness}/{e.Fallacy}",
+            $"{FormatRounded(e.Volume)}/{FormatRounded(e.Darkness)}/{FormatRounded(e.Fallacy)}",
         _ => throw new InvalidOperationException($"Unknown signal value kind: {value.GetType().Name}."),
     };
+
+    private static string FormatRounded(double value) =>
+        Math.Round(value, MidpointRounding.AwayFromZero).ToString(CultureInfo.InvariantCulture);
 
     private static string FormatEffort(decimal value) =>
         value.ToString("0.##", CultureInfo.InvariantCulture);

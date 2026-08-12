@@ -5,4 +5,8 @@
     <AssemblyName>MarlothStrategy.Simulation</AssemblyName>
   </PropertyGroup>
 
+  <ItemGroup>
+    <Content Include="config\**\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

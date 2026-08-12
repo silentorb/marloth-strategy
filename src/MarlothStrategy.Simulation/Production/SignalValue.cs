@@ -4,35 +4,44 @@ namespace MarlothStrategy.Simulation.Production;
 
 /// <summary>
 /// Strongly typed signal payload: resources (additive) or information (copied/mutated).
+/// Numeric fields are floating-point (<see cref="double"/>).
 /// </summary>
 public abstract record SignalValue(SignalTypeId TypeId)
 {
     public abstract SignalKind Kind { get; }
 
     /// <summary>Resource: money quantity. Added and subtracted when routed or consumed.</summary>
-    public sealed record Money(int Amount) : SignalValue(SignalTypes.Money)
+    public sealed record Money(double Amount) : SignalValue(SignalTypes.Money)
     {
         public override SignalKind Kind => SignalKind.Resource;
 
-        public Money Add(int delta) => new(Amount + delta);
+        public Money Add(double delta) => new(Amount + delta);
 
-        public Money WithAmount(int amount) => new(amount);
+        public Money WithAmount(double amount) => new(amount);
     }
 
     /// <summary>
     /// Information: a single enchantment. Copied on route and mutated by nodes (not additively merged).
     /// </summary>
-    public sealed record Enchantment(int Volume, int Darkness, int Fallacy)
+    public sealed record Enchantment(double Volume, double Darkness, double Fallacy)
         : SignalValue(SignalTypes.Enchantment)
     {
         public override SignalKind Kind => SignalKind.Information;
 
-        public Enchantment Mutate() => new(
-            Volume + 10,
-            Darkness + 1,
-            Fallacy + Darkness + 1);
+        public Enchantment Mutate(EnchantNodeConfig config)
+        {
+            ArgumentNullException.ThrowIfNull(config);
+            return new(
+                Volume + config.VolumeDelta,
+                Darkness + config.DarknessDelta,
+                Fallacy + Darkness + config.FallacyConstant);
+        }
 
-        public int SellPayout() => Math.Max(0, Volume - Fallacy);
+        public double SellPayout(SellNodeConfig config)
+        {
+            ArgumentNullException.ThrowIfNull(config);
+            return Math.Max(config.PayoutFloor, Volume - Fallacy);
+        }
     }
 
     public SignalValue Copy() => this switch

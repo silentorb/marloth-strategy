@@ -40,6 +40,8 @@ Label each changed path:
 
 Include related pre-existing changes in the same per-repo commit. For unrelated dirty files, note "exclude" or ask before mixing.
 
+**Standing include (marloth-strategy):** Dirty paths under `src/MarlothStrategy.Simulation/config/**` are **always Include** with the marloth-strategy plan commit unless the user explicitly excludes them.
+
 ## 3. Per-repo commit plan
 
 Default: **one commit per affected repo** (not one squashed commit across repos).

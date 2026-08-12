@@ -46,14 +46,15 @@ Do not use “man/manning” in product language; use **assignment** / **assigne
 |-------|--------|
 | Actors | One actor (`A1`), capacity `1.0` |
 | Actions | `enchant` — consumes an enchantment, produces a mutated copy; `sell` — consumes an enchantment, produces money |
-| Enchant formula | `volume + 10`, `darkness + 1`, `fallacy + darkness + 1` (using input darkness) |
-| Sell formula | money = `max(0, volume - fallacy)` |
+| Enchant formula | `volume + volumeDelta`, `darkness + darknessDelta`, `fallacy + darkness + fallacyConstant` (defaults `10` / `1` / `1` from config) |
+| Sell formula | money = `max(payoutFloor, volume - fallacy)` (default `payoutFloor=0`) |
 | Graph | Enchantment **fans out**: copy `enchant` → `enchant` (feedback) and copy `enchant` → `sell`; money flows `sell` → `enchant` (treasury; enchant does not consume money) |
 | Assignment | `A1` assigned to **both** actions → effort `0.5` each |
-| Throughput | At effort `1.0`, an action may process up to **20** resource units per tick when applicable (`BaseThroughput = 20`). Information actions process **at most one** enchantment per tick when `floor(BaseThroughput * effort) >= 1` and an input is present. |
+| Throughput | At effort `1.0`, an action may process up to **`baseThroughput`** resource units per tick when applicable (default `20` per type config). Information actions process **at most one** enchantment per tick when `floor(baseThroughput * effort) >= 1` and an input is present. |
+| Config | Tunable numerics live in Simulation `config/node-types/{enchant,sell}.json` (heterogeneous); port layouts and seed wiring stay in code |
 | Starting stocks | `enchant` enchantment = `(volume:0, darkness:0, fallacy:0)`; `enchant` money = `100`; `sell` enchantment empty |
 
-Expected early behavior: first tick `enchant` mutates `(0,0,0)` → `(10,1,1)` and fans copies to itself and `sell` while `sell` is idle; second tick `sell` pays `max(0,10-1)=9` money onto the treasury while `enchant` mutates again to `(20,2,3)`.
+Expected early behavior: first tick `enchant` mutates `(0,0,0)` → `(10,1,1)` and fans copies to itself and `sell` while `sell` is idle; second tick `sell` pays `max(0,10-1)=9` money onto the treasury while `enchant` mutates again to `(20,2,3)`. Signal values are floating-point; the console rounds them for display.
 
 ## Related docs
 

@@ -5,10 +5,18 @@ namespace MarlothStrategy.Simulation.Tests;
 
 public sealed class MagicAgencyProductionTests
 {
+    private static readonly NodeTypeConfigs DefaultConfigs = new(
+        new EnchantNodeConfig(
+            BaseThroughput: 20,
+            VolumeDelta: 10,
+            DarknessDelta: 1,
+            FallacyConstant: 1),
+        new SellNodeConfig(BaseThroughput: 20, PayoutFloor: 0));
+
     [Fact]
     public void Seed_HasFanOutEnchantmentEdgesMoneyTreasuryAndDualAssignment()
     {
-        var state = MagicAgencySeed.CreateInitialState();
+        var state = MagicAgencySeed.CreateInitialState(DefaultConfigs);
 
         Assert.Equal(0, state.Tick);
         Assert.Single(state.Actors);
@@ -56,12 +64,13 @@ public sealed class MagicAgencyProductionTests
         Assert.False(
             state.PortSignals.ContainsKey(
                 new PortKey(MagicAgencySeed.SellNodeId, MagicAgencySeed.EnchantmentPortId)));
+        Assert.Equal(DefaultConfigs, state.NodeConfigs);
     }
 
     [Fact]
     public void Seed_SplitsEffortEquallyAcrossAssignments()
     {
-        var state = MagicAgencySeed.CreateInitialState();
+        var state = MagicAgencySeed.CreateInitialState(DefaultConfigs);
         var effort = ProductionTick.ResolveEffortByNode(state);
 
         Assert.Equal(0.5m, effort[MagicAgencySeed.EnchantNodeId]);
@@ -71,7 +80,7 @@ public sealed class MagicAgencyProductionTests
     [Fact]
     public void FirstTick_EnchantMutatesAndFansOut_SellIdle_MoneyUnchanged()
     {
-        var state = MagicAgencySeed.CreateInitialState();
+        var state = MagicAgencySeed.CreateInitialState(DefaultConfigs);
         var result = ProductionTick.AdvanceTickWithReport(state);
         var next = result.State;
 
@@ -106,7 +115,7 @@ public sealed class MagicAgencyProductionTests
     [Fact]
     public void SecondTick_SellPaysVolumeMinusFallacy_EnchantMutatesAgain()
     {
-        var state = MagicAgencySeed.CreateInitialState();
+        var state = MagicAgencySeed.CreateInitialState(DefaultConfigs);
         var afterOne = ProductionTick.AdvanceTick(state);
         var result = ProductionTick.AdvanceTickWithReport(afterOne);
         var afterTwo = result.State;
@@ -139,7 +148,7 @@ public sealed class MagicAgencyProductionTests
     [Fact]
     public void AdvanceTick_IsIndependentOfNodeIterationOrder()
     {
-        var state = MagicAgencySeed.CreateInitialState();
+        var state = MagicAgencySeed.CreateInitialState(DefaultConfigs);
         var forward = new[] { MagicAgencySeed.EnchantNodeId, MagicAgencySeed.SellNodeId };
         var reverse = new[] { MagicAgencySeed.SellNodeId, MagicAgencySeed.EnchantNodeId };
 
@@ -175,13 +184,50 @@ public sealed class MagicAgencyProductionTests
     public void Enchantment_MutateAndSellPayout_MatchDocumentedFormulas()
     {
         var start = new SignalValue.Enchantment(0, 0, 0);
-        var once = start.Mutate();
+        var once = start.Mutate(DefaultConfigs.Enchant);
         Assert.Equal(new SignalValue.Enchantment(10, 1, 1), once);
-        Assert.Equal(9, once.SellPayout());
+        Assert.Equal(9, once.SellPayout(DefaultConfigs.Sell));
 
-        var twice = once.Mutate();
+        var twice = once.Mutate(DefaultConfigs.Enchant);
         Assert.Equal(new SignalValue.Enchantment(20, 2, 3), twice);
-        Assert.Equal(17, twice.SellPayout());
+        Assert.Equal(17, twice.SellPayout(DefaultConfigs.Sell));
+    }
+
+    [Fact]
+    public void LoadFromBaseDirectory_MatchesCommittedJsonDefaults()
+    {
+        var loaded = NodeTypeConfigLoader.LoadFromBaseDirectory();
+
+        Assert.Equal(20, loaded.Enchant.BaseThroughput);
+        Assert.Equal(10, loaded.Enchant.VolumeDelta);
+        Assert.Equal(1, loaded.Enchant.DarknessDelta);
+        Assert.Equal(1, loaded.Enchant.FallacyConstant);
+        Assert.Equal(20, loaded.Sell.BaseThroughput);
+        Assert.Equal(0, loaded.Sell.PayoutFloor);
+    }
+
+    [Fact]
+    public void TweakedConfig_ChangesMutateAndSellPayout()
+    {
+        var configs = new NodeTypeConfigs(
+            new EnchantNodeConfig(
+                BaseThroughput: 20,
+                VolumeDelta: 5,
+                DarknessDelta: 2,
+                FallacyConstant: 0),
+            new SellNodeConfig(BaseThroughput: 20, PayoutFloor: 3));
+
+        var state = MagicAgencySeed.CreateInitialState(configs);
+        var afterOne = ProductionTick.AdvanceTick(state);
+        var afterTwo = ProductionTick.AdvanceTick(afterOne);
+
+        Assert.Equal(
+            new SignalValue.Enchantment(10, 4, 2),
+            Signal(afterTwo, MagicAgencySeed.EnchantNodeId, MagicAgencySeed.EnchantmentPortId));
+        // first sell sees (5,2,0) -> max(3, 5-0)=5; treasury 100+5
+        Assert.Equal(
+            new SignalValue.Money(105),
+            Signal(afterTwo, MagicAgencySeed.EnchantNodeId, MagicAgencySeed.MoneyPortId));
     }
 
     private static SignalValue Signal(GameState state, NodeId node, PortId port) =>

@@ -25,9 +25,11 @@ There is no package/NuGet link to Imp; this is a C# model inspired by Imp’s gr
 
 ## Numeric policy
 
-All numeric values in simulation **data** are **`int`**, unless explicitly documented otherwise.
+Signal payloads (`Money.Amount`, enchantment `volume` / `darkness` / `fallacy`) and node behavior numerics from config are floating-point (`double`).
 
-**Exception:** actor **capacity** and per-node **effort** remain `decimal` ratios. When converting fractional effort into a process limit, **round down** (`decimal.Floor` / toward −∞).
+Actor **capacity** and per-node **effort** remain `decimal` ratios. When converting fractional effort into a process limit, **round down** (`decimal.Floor` / toward −∞).
+
+Console display rounds signal numerics to nearest integers; simulation keeps exact doubles.
 
 ## Core types
 
@@ -37,10 +39,11 @@ Identifiers are strings (or thin string wrappers): `NodeId`, `EdgeId`, `NodeType
 |------|------|
 | `Port` / `NodeType` | Catalog: input/output ports + signal types |
 | `Node` / `Edge` / `PortReference` / `NodeGraph` | Instance wiring |
-| `SignalValue` | Typed payloads: resource `Money(int)` or information `Enchantment(volume, darkness, fallacy)` |
+| `SignalValue` | Typed payloads: resource `Money(double)` or information `Enchantment(volume, darkness, fallacy)` as `double` |
 | `Actor` | `Id`, `Capacity` (`decimal`) |
 | `Assignment` | `ActorId` → `NodeId` (many actions per actor) |
-| `GameState` | Graph + node-type catalog + port signal map + actors + assignments + `Tick` |
+| `NodeTypeConfigs` | Per-type behavior numerics loaded from JSON and attached to state |
+| `GameState` | Graph + node-type catalog + port signal map + actors + assignments + node configs + `Tick` |
 
 Port signals are keyed by `(NodeId, PortId)`.
 
@@ -61,24 +64,28 @@ Unassigned → `0`.
 
 Seed: capacity `1.0`, two assignments → `0.5` each.
 
-Process limit: `limit = floor(BaseThroughput * effort)` with `BaseThroughput = 20`.
+Process limit: `limit = floor(baseThroughput * effort)` using each node type’s `baseThroughput` from config (seed defaults: `20`).
 
 - Resource converters (when applicable): `processed = min(available, limit)`.
 - Information nodes (`enchant`, `sell`): run when `limit >= 1` and an enchantment input is present; process **at most one** enchantment per tick.
 
 ## Node behaviors
 
+Tunable numerics live in `config/node-types/{enchant,sell}.json` (heterogeneous schemas). Port layouts stay in code. Seed defaults match the formulas below.
+
 ### `enchant`
 
 - Inputs: `enchantment` (processed), `money` (treasury stock only — never consumed).
 - Output: `enchantment`.
 - When run: consume input enchantment; emit copy with  
-  `volume + 10`, `darkness + 1`, `fallacy + darkness + 1` (input darkness).
+  `volume + volumeDelta`, `darkness + darknessDelta`, `fallacy + darkness + fallacyConstant` (input darkness).  
+  Defaults: `volumeDelta=10`, `darknessDelta=1`, `fallacyConstant=1`.
 
 ### `sell`
 
 - Input: `enchantment`; output: `money`.
-- When run: consume input enchantment; produce `Money(max(0, volume - fallacy))`.
+- When run: consume input enchantment; produce `Money(max(payoutFloor, volume - fallacy))`.  
+  Default: `payoutFloor=0`.
 
 ## Two-phase tick
 
@@ -111,7 +118,7 @@ state = AdvanceTick(state); // mutable binding, immutable values
 
 ## Magic agency seed
 
-Factory: `MagicAgencySeed.CreateInitialState()`.
+Factory: `MagicAgencySeed.CreateInitialState()` (loads node configs from `config/node-types/` under the app base directory; overload accepts an explicit `NodeTypeConfigs`).
 
 - Node types: `enchant` (in `enchantment` + `money`, out `enchantment`), `sell` (in `enchantment`, out `money`).
 - Nodes: `enchant`, `sell`.
@@ -124,11 +131,12 @@ Factory: `MagicAgencySeed.CreateInitialState()`.
 Under `src/MarlothStrategy.Simulation/`:
 
 - `Graph/` — structural Imp-like types
-- `Production/` — signals, catalog, `GameState`, seed, `AdvanceTick`
+- `Production/` — signals, catalog, `GameState`, seed, `AdvanceTick`, config DTOs/loader
+- `config/node-types/` — JSON behavior numerics per node type (copied to output)
 
 ## Error handling
 
-Seed and tick assume a well-formed graph for v1 (programmer invariants). Malformed catalogs or missing node types are exceptional (`InvalidOperationException`). Expected empty stocks are normal (process zero / idle).
+Seed and tick assume a well-formed graph for v1 (programmer invariants). Malformed catalogs or missing node types are exceptional (`InvalidOperationException`). Missing or invalid node-type JSON at seed/boot is exceptional (fail-fast with path context). Expected empty stocks are normal (process zero / idle).
 
 ## Related docs
 
