@@ -13,7 +13,7 @@ public sealed class TickReportPrinterTests
         var text = TickReportPrinter.FormatStartingStocks(state);
 
         Assert.Contains("Starting stocks (tick 0)", text);
-        Assert.Contains("enchant.money: 10", text);
+        Assert.Contains("enchant.money: 100", text);
         Assert.Contains("sell.enchantments: 0", text);
     }
 
@@ -28,23 +28,23 @@ public sealed class TickReportPrinterTests
                     0.5m,
                     MagicAgencySeed.MoneyPortId,
                     SignalTypes.Money,
-                    10m,
-                    1m,
-                    9m,
+                    100,
+                    10,
+                    90,
                     MagicAgencySeed.EnchantmentsPortId,
                     SignalTypes.Enchantments,
-                    1m),
+                    10),
                 new NodeIoRow(
                     MagicAgencySeed.SellNodeId,
                     0.5m,
                     MagicAgencySeed.EnchantmentsPortId,
                     SignalTypes.Enchantments,
-                    0m,
-                    0m,
-                    0m,
+                    0,
+                    0,
+                    0,
                     MagicAgencySeed.MoneyPortId,
                     SignalTypes.Money,
-                    0m)));
+                    0)));
 
         var text = TickReportPrinter.FormatTickReport(result);
 
@@ -57,8 +57,8 @@ public sealed class TickReportPrinterTests
         Assert.Contains("Output", text);
         Assert.Contains("enchant", text);
         Assert.Contains("sell", text);
-        Assert.Contains("money 10", text);
-        Assert.Contains("enchantments 1", text);
+        Assert.Contains("money 100", text);
+        Assert.Contains("enchantments 10", text);
         Assert.Contains("0.5", text);
     }
 }

@@ -42,10 +42,10 @@ public sealed class MagicAgencyProductionTests
             a => a.ActorId == MagicAgencySeed.ActorId && a.NodeId == MagicAgencySeed.SellNodeId);
 
         Assert.Equal(
-            10m,
+            100,
             Quantity(state, MagicAgencySeed.EnchantNodeId, MagicAgencySeed.MoneyPortId));
         Assert.Equal(
-            0m,
+            0,
             Quantity(state, MagicAgencySeed.SellNodeId, MagicAgencySeed.EnchantmentsPortId));
     }
 
@@ -60,7 +60,7 @@ public sealed class MagicAgencyProductionTests
     }
 
     [Fact]
-    public void FirstTick_EnchantConvertsOneMoney_SellIdle()
+    public void FirstTick_EnchantConvertsTenMoney_SellIdle()
     {
         var state = MagicAgencySeed.CreateInitialState();
         var result = ProductionTick.AdvanceTickWithReport(state);
@@ -68,31 +68,31 @@ public sealed class MagicAgencyProductionTests
 
         Assert.Equal(1, next.Tick);
         Assert.Equal(
-            9m,
+            90,
             Quantity(next, MagicAgencySeed.EnchantNodeId, MagicAgencySeed.MoneyPortId));
         Assert.Equal(
-            1m,
+            10,
             Quantity(next, MagicAgencySeed.SellNodeId, MagicAgencySeed.EnchantmentsPortId));
 
         var enchant = Row(result, MagicAgencySeed.EnchantNodeId);
         Assert.Equal(0.5m, enchant.Effort);
-        Assert.Equal(10m, enchant.Available);
-        Assert.Equal(1m, enchant.Consumed);
-        Assert.Equal(9m, enchant.Residual);
-        Assert.Equal(1m, enchant.Produced);
+        Assert.Equal(100, enchant.Available);
+        Assert.Equal(10, enchant.Consumed);
+        Assert.Equal(90, enchant.Residual);
+        Assert.Equal(10, enchant.Produced);
         Assert.Equal(SignalTypes.Money, enchant.InputType);
         Assert.Equal(SignalTypes.Enchantments, enchant.OutputType);
 
         var sell = Row(result, MagicAgencySeed.SellNodeId);
         Assert.Equal(0.5m, sell.Effort);
-        Assert.Equal(0m, sell.Available);
-        Assert.Equal(0m, sell.Consumed);
-        Assert.Equal(0m, sell.Residual);
-        Assert.Equal(0m, sell.Produced);
+        Assert.Equal(0, sell.Available);
+        Assert.Equal(0, sell.Consumed);
+        Assert.Equal(0, sell.Residual);
+        Assert.Equal(0, sell.Produced);
     }
 
     [Fact]
-    public void SecondTick_SellConvertsRoutedEnchantment_MoneyReturnsTowardEnchant()
+    public void SecondTick_SellConvertsRoutedEnchantments_MoneyReturnsTowardEnchant()
     {
         var state = MagicAgencySeed.CreateInitialState();
         var afterOne = ProductionTick.AdvanceTick(state);
@@ -100,26 +100,26 @@ public sealed class MagicAgencyProductionTests
         var afterTwo = result.State;
 
         Assert.Equal(2, afterTwo.Tick);
-        // enchant: 9 available → process 1 → residual 8; sell routes +1 money → 9
+        // enchant: 90 available → process 10 → residual 80; sell routes +10 money → 90
         Assert.Equal(
-            9m,
+            90,
             Quantity(afterTwo, MagicAgencySeed.EnchantNodeId, MagicAgencySeed.MoneyPortId));
-        // sell: 1 available → process 1 → residual 0; enchant routes +1 enchantment → 1
+        // sell: 10 available → process 10 → residual 0; enchant routes +10 enchantments → 10
         Assert.Equal(
-            1m,
+            10,
             Quantity(afterTwo, MagicAgencySeed.SellNodeId, MagicAgencySeed.EnchantmentsPortId));
 
         var enchant = Row(result, MagicAgencySeed.EnchantNodeId);
-        Assert.Equal(9m, enchant.Available);
-        Assert.Equal(1m, enchant.Consumed);
-        Assert.Equal(8m, enchant.Residual);
-        Assert.Equal(1m, enchant.Produced);
+        Assert.Equal(90, enchant.Available);
+        Assert.Equal(10, enchant.Consumed);
+        Assert.Equal(80, enchant.Residual);
+        Assert.Equal(10, enchant.Produced);
 
         var sell = Row(result, MagicAgencySeed.SellNodeId);
-        Assert.Equal(1m, sell.Available);
-        Assert.Equal(1m, sell.Consumed);
-        Assert.Equal(0m, sell.Residual);
-        Assert.Equal(1m, sell.Produced);
+        Assert.Equal(10, sell.Available);
+        Assert.Equal(10, sell.Consumed);
+        Assert.Equal(0, sell.Residual);
+        Assert.Equal(10, sell.Produced);
     }
 
     [Fact]
@@ -151,7 +151,7 @@ public sealed class MagicAgencyProductionTests
             Quantity(reverse2, MagicAgencySeed.SellNodeId, MagicAgencySeed.EnchantmentsPortId));
     }
 
-    private static decimal Quantity(GameState state, NodeId node, PortId port) =>
+    private static int Quantity(GameState state, NodeId node, PortId port) =>
         state.PortSignals[new PortKey(node, port)].Quantity;
 
     private static NodeIoRow Row(ProductionTickResult result, NodeId node) =>

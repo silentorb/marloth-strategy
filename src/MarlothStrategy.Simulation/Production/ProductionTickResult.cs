@@ -8,12 +8,12 @@ public sealed record NodeIoRow(
     decimal Effort,
     PortId InputPort,
     SignalTypeId InputType,
-    decimal Available,
-    decimal Consumed,
-    decimal Residual,
+    int Available,
+    int Consumed,
+    int Residual,
     PortId OutputPort,
     SignalTypeId OutputType,
-    decimal Produced);
+    int Produced);
 
 public sealed record ProductionTickResult(
     GameState State,

@@ -5,7 +5,7 @@ namespace MarlothStrategy.Simulation.Production;
 
 public static class ProductionTick
 {
-    public const decimal BaseThroughput = 2m;
+    public const int BaseThroughput = 20;
 
     public static GameState AdvanceTick(GameState state) =>
         AdvanceTickWithReport(state).State;
@@ -136,10 +136,11 @@ public static class ProductionTick
 
             var available = resolvedInputs.TryGetValue(inputKey, out var inputValue)
                 ? inputValue.Quantity
-                : 0m;
+                : 0;
 
-            var processed = Math.Min(available, BaseThroughput * effort);
-            if (processed < 0m)
+            var limit = (int)decimal.Floor(BaseThroughput * effort);
+            var processed = Math.Min(available, limit);
+            if (processed < 0)
             {
                 throw new InvalidOperationException("Processed amount must not be negative.");
             }
@@ -173,7 +174,7 @@ public static class ProductionTick
         foreach (var edge in state.Graph.Edges.Values)
         {
             var fromKey = new PortKey(edge.From.Node, edge.From.Port);
-            if (!outputs.TryGetValue(fromKey, out var produced) || produced.Quantity == 0m)
+            if (!outputs.TryGetValue(fromKey, out var produced) || produced.Quantity == 0)
             {
                 continue;
             }
@@ -211,7 +212,7 @@ public static class ProductionTick
         return next.ToImmutable();
     }
 
-    private static SignalValue CreateSignal(SignalTypeId typeId, decimal amount)
+    private static SignalValue CreateSignal(SignalTypeId typeId, int amount)
     {
         if (typeId == SignalTypes.Money)
         {

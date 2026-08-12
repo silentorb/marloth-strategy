@@ -42,6 +42,9 @@ public static class TickReportPrinter
         return sb.ToString().TrimEnd();
     }
 
+    private static string FormatQuantity(int value) =>
+        value.ToString(CultureInfo.InvariantCulture);
+
     private static string FormatQuantity(decimal value) =>
         value.ToString("0.##", CultureInfo.InvariantCulture);
 

@@ -31,7 +31,7 @@ Identifiers are strings (or thin string wrappers): `NodeId`, `EdgeId`, `NodeType
 |------|------|
 | `Port` / `NodeType` | Catalog: input/output ports + signal types |
 | `Node` / `Edge` / `PortReference` / `NodeGraph` | Instance wiring |
-| `SignalValue` | Typed quantities (v1: `Money`, `Enchantments` as decimals) |
+| `SignalValue` | Typed quantities (v1: `Money`, `Enchantments` as ints) |
 | `Actor` | `Id`, `Capacity` |
 | `Assignment` | `ActorId` → `NodeId` (many actions per actor) |
 | `GameState` | Graph + node-type catalog + port signal map + actors + assignments + `Tick` |
@@ -46,7 +46,9 @@ Unassigned → `0`.
 
 Seed: capacity `1.0`, two assignments → `0.5` each.
 
-Throughput: `processed = min(availableInput, BaseThroughput * effort)` with `BaseThroughput = 2` and 1:1 conversion. Residual unconsumed input stays on the input port.
+Throughput: `processed = min(availableInput, floor(BaseThroughput * effort))` with `BaseThroughput = 20` and 1:1 conversion. Residual unconsumed input stays on the input port.
+
+**Rounding:** whenever a fractional intermediate becomes an int signal amount or process limit, **round down** (`decimal.Floor` / toward −∞). Effort and capacity remain decimals; only the conversion into processable units floors.
 
 ## Two-phase tick
 
@@ -85,7 +87,7 @@ Factory: `MagicAgencySeed.CreateInitialState()`.
 - Nodes: `enchant`, `sell`.
 - Edges: `enchant.enchantments` → `sell.enchantments`; `sell.money` → `enchant.money`.
 - Actor `A1` capacity `1.0`, assigned to both nodes.
-- Initial signals: `enchant.money = 10`, `sell.enchantments = 0`; `Tick = 0`.
+- Initial signals: `enchant.money = 100`, `sell.enchantments = 0`; `Tick = 0`.
 
 ## Layout
 

@@ -41,10 +41,10 @@ Do not use “man/manning” in product language; use **assignment** / **assigne
 | Actions | `enchant` — consumes money, produces enchantments; `sell` — consumes enchantments, produces money |
 | Graph | Cycle: enchantments flow `enchant` → `sell`; money flows `sell` → `enchant` |
 | Assignment | `A1` assigned to **both** actions → effort `0.5` each |
-| Throughput | At effort `1.0`, an action may process up to **2** units of its input per tick (`BaseThroughput = 2`), 1:1 conversion. With effort `0.5`, up to **1** unit/tick when stock allows. Unconsumed input remains as residual stock. |
-| Starting stocks | `enchant` money input = `10`; `sell` enchantments input = `0` |
+| Throughput | At effort `1.0`, an action may process up to **20** units of its input per tick (`BaseThroughput = 20`), 1:1 conversion. With effort `0.5`, up to **10** units/tick when stock allows (`floor(BaseThroughput * effort)`). Unconsumed input remains as residual stock. |
+| Starting stocks | `enchant` money input = `100`; `sell` enchantments input = `0` |
 
-Expected early behavior: first tick converts 1 money into 1 enchantment at `enchant` while `sell` has nothing to process; second tick `sell` can convert the routed enchantment back into money toward `enchant`.
+Expected early behavior: first tick converts 10 money into 10 enchantments at `enchant` while `sell` has nothing to process; second tick `sell` can convert the routed enchantments back into money toward `enchant`.
 
 ## Related docs
 

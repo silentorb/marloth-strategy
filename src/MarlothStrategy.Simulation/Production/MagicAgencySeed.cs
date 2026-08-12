@@ -71,10 +71,10 @@ public static class MagicAgencySeed
         var signals = ImmutableDictionary<PortKey, SignalValue>.Empty
             .Add(
                 new PortKey(EnchantNodeId, MoneyPortId),
-                new SignalValue.Money(10m))
+                new SignalValue.Money(100))
             .Add(
                 new PortKey(SellNodeId, EnchantmentsPortId),
-                new SignalValue.Enchantments(0m));
+                new SignalValue.Enchantments(0));
 
         return new GameState(
             graph,
