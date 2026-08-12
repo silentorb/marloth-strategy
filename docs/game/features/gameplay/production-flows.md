@@ -20,41 +20,51 @@ The first domain is a **magic agency** that creates enchantments as a service.
 | Kind | Behavior | Example |
 |------|----------|---------|
 | **Resource** | Primitive scalar; **added** and **subtracted** when routed or consumed | **money** (quantity) |
-| **Information** | Complex structure; **copied** on route and **mutated** by actions (working title) | **enchantment** (single value with `volume`, `darkness`, `fallacy`) |
+| **Information** | Complex structure; **copied** on route and **mutated** only inside node logic | **enchantment** (single value with `volume`, `darkness`, `fallacy`) |
 
 - Money signals carry a quantity of money. Enchantment signals carry a **single** enchantment (not a count).
 - Actions consume input signals and produce output signals each production tick according to their node rules.
+- Routing and fan-out only **copy** emitted values; they never mutate information.
 
-## Actors and assignment
+## Actors, stats, and assignment
 
-- An **actor** can be **assigned** to one or more actions.
-- Assignment means the actor operates those actions for the tick.
-- When an actor is assigned to multiple actions, their **capacity** is split **equally** among those actions (`effort = capacity / assignment count` for that actor).
+- An **actor** has a **capacity** and a dictionary of **stats** (e.g. `enchanting`, `sales`).
+- Preferred **assignments** list which actions an actor may operate. Each tick, only actions whose **prerequisites** are met become **effective** assignments (for `enchant` / `sell`: an enchantment on the process input). Actors are not assigned to actions that fail prerequisites that tick.
+- When an actor has multiple effective assignments, capacity is split equally: **assignment effort** = `capacity / effective count` for that actor. Efforts from several actors on one action **add**.
 - Unassigned actions do nothing that tick.
-- If several actors are assigned to the same action, their efforts **add**.
+- Progress gain on an action is `stat × assignmentEffort` for the relevant stat (`enchanting` on enchant, `sales` on sell). If an actor lacks that stat, the default is **1**.
 
 Do not use “man/manning” in product language; use **assignment** / **assigned**.
+
+## Progress, work effort, and cost
+
+- Each action tracks runtime **progress** (carried across ticks).
+- Node config **`effort`** is the work units required per application (mutation or sale). Config **`cost`** is money charged from the agency treasury per successful application.
+- While `progress >= effort` and the treasury can pay `cost`, the action may apply one or more times in a tick; each application subtracts `effort` from progress and charges `cost`.
+- **`enchant`:** with assignment effort and an input enchantment, the node always forwards the enchantment to its output—either **mutate** (one or more paid applications) or **pass-through** (emit the same value unchanged). Progress may still rise on a pass-through tick.
+- **`sell`:** when progress and treasury allow, consume the enchantment and produce money; otherwise leave the input as residual (no information pass-through).
 
 ## Circular flows and ticks
 
 - Production updates run in discrete **ticks**. For now, one player turn advances one production tick.
 - To avoid resolution-order races on cycles, every action computes outputs from **inputs committed on the previous tick** (buffered signals). Same-tick outputs are not visible to other actions until the next tick.
+- Information ports hold a single value. If a consumer still has stock after residuals, a routed copy to that port is **skipped** that commit (occupancy).
 
 ## Magic agency seed (initial configuration)
 
 | Piece | Detail |
 |-------|--------|
-| Actors | One actor (`A1`), capacity `1.0` |
-| Actions | `enchant` — consumes an enchantment, produces a mutated copy; `sell` — consumes an enchantment, produces money |
-| Enchant formula | `volume + volumeDelta`, `darkness + darknessDelta`, `fallacy + darkness + fallacyConstant` (defaults `10` / `1` / `1` from config) |
+| Actors | One actor (`intern`), capacity `1.0`, stats `enchanting: 10`, `sales: 10` (from `config/actors/intern.json`) |
+| Actions | `enchant` — mutate or pass-through an enchantment; `sell` — consume an enchantment, produce money |
+| Enchant formula | On each mutation: `volume + volumeDelta`, `darkness + darknessDelta`, `fallacy + darkness + fallacyConstant` (defaults `10` / `1` / `1`) |
 | Sell formula | money = `max(payoutFloor, volume - fallacy)` (default `payoutFloor=0`) |
-| Graph | Enchantment **fans out**: copy `enchant` → `enchant` (feedback) and copy `enchant` → `sell`; money flows `sell` → `enchant` (treasury; enchant does not consume money) |
-| Assignment | `A1` assigned to **both** actions → effort `0.5` each |
-| Throughput | At effort `1.0`, an action may process up to **`baseThroughput`** resource units per tick when applicable (default `20` per type config). Information actions process **at most one** enchantment per tick when `floor(baseThroughput * effort) >= 1` and an input is present. |
-| Config | Tunable numerics live in Simulation `config/node-types/{enchant,sell}.json` (heterogeneous); port layouts and seed wiring stay in code |
-| Starting stocks | `enchant` enchantment = `(volume:0, darkness:0, fallacy:0)`; `enchant` money = `100`; `sell` enchantment empty |
+| Graph | Enchantment **fans out**: copy `enchant` → `enchant` (feedback) and copy `enchant` → `sell`; money flows `sell` → `enchant` (treasury) |
+| Assignment | Preferred: `intern` → both actions; effective set drops nodes without an enchantment input |
+| Work / cost | Config `effort: 10`, `cost: 20` per type; progress gain uses actor stats × assignment effort |
+| Config | Node numerics in `config/node-types/{enchant,sell}.json`; actors in `config/actors/*.json`; port layouts and seed wiring stay in code |
+| Starting stocks | `enchant` enchantment = `(volume:0, darkness:0, fallacy:0)`; `enchant` money = `100`; `sell` enchantment empty; node progress `0` |
 
-Expected early behavior: first tick `enchant` mutates `(0,0,0)` → `(10,1,1)` and fans copies to itself and `sell` while `sell` is idle; second tick `sell` pays `max(0,10-1)=9` money onto the treasury while `enchant` mutates again to `(20,2,3)`. Signal values are floating-point; the console rounds them for display.
+Expected early behavior: first tick sell has no input so `intern` assigns only to `enchant` (assignment effort `1.0`); progress gains `10`, one mutation runs (`(0,0,0)` → `(10,1,1)`), treasury pays `cost` → money `80`, copies fan out to `enchant` and `sell`. Later ticks split effort when both have inputs; sell completes when its progress and treasury allow. Signal values are floating-point; the console rounds them for display.
 
 ## Related docs
 

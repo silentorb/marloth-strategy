@@ -8,11 +8,12 @@ public sealed class TickReportPrinterTests
 {
     private static readonly NodeTypeConfigs DefaultConfigs = new(
         new EnchantNodeConfig(
-            BaseThroughput: 20,
+            Cost: 20,
+            Effort: 10,
             VolumeDelta: 10,
             DarknessDelta: 1,
             FallacyConstant: 1),
-        new SellNodeConfig(BaseThroughput: 20, PayoutFloor: 0));
+        new SellNodeConfig(Cost: 20, Effort: 10, PayoutFloor: 0));
 
     [Fact]
     public void FormatStartingStocks_IncludesTickAndPortSignals()

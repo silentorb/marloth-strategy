@@ -1,0 +1,8 @@
+{
+  "id": "intern",
+  "capacity": 1.0,
+  "stats": {
+    "enchanting": 10,
+    "sales": 10
+  }
+}

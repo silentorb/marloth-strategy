@@ -1,4 +1,5 @@
 {
-  "baseThroughput": 20,
+  "cost": 20,
+  "effort": 10,
   "payoutFloor": 0
 }

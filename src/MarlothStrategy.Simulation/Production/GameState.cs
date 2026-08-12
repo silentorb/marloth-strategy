@@ -10,4 +10,5 @@ public sealed record GameState(
     ImmutableDictionary<ActorId, Actor> Actors,
     ImmutableArray<Assignment> Assignments,
     NodeTypeConfigs NodeConfigs,
+    ImmutableDictionary<NodeId, double> NodeProgress,
     int Tick);

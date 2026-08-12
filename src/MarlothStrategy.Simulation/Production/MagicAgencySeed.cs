@@ -11,17 +11,31 @@ public static class MagicAgencySeed
     public static readonly NodeId EnchantNodeId = new("enchant");
     public static readonly NodeId SellNodeId = new("sell");
 
-    public static readonly ActorId ActorId = new("A1");
+    public static readonly ActorId ActorId = new("intern");
 
     public static readonly PortId MoneyPortId = new("money");
     public static readonly PortId EnchantmentPortId = new("enchantment");
 
     public static GameState CreateInitialState() =>
-        CreateInitialState(NodeTypeConfigLoader.LoadFromBaseDirectory());
+        CreateInitialState(
+            NodeTypeConfigLoader.LoadFromBaseDirectory(),
+            ActorConfigLoader.LoadFromBaseDirectory());
 
-    public static GameState CreateInitialState(NodeTypeConfigs nodeConfigs)
+    public static GameState CreateInitialState(NodeTypeConfigs nodeConfigs) =>
+        CreateInitialState(nodeConfigs, ActorConfigLoader.LoadFromBaseDirectory());
+
+    public static GameState CreateInitialState(
+        NodeTypeConfigs nodeConfigs,
+        ImmutableDictionary<ActorId, Actor> actors)
     {
         ArgumentNullException.ThrowIfNull(nodeConfigs);
+        ArgumentNullException.ThrowIfNull(actors);
+
+        if (!actors.ContainsKey(ActorId))
+        {
+            throw new InvalidOperationException(
+                $"Magic agency seed requires actor '{ActorId}'.");
+        }
 
         var moneyType = new SignalType(SignalTypes.Money);
         var enchantmentType = new SignalType(SignalTypes.Enchantment);
@@ -70,10 +84,6 @@ public static class MagicAgencySeed
                         new PortReference(SellNodeId, MoneyPortId),
                         new PortReference(EnchantNodeId, MoneyPortId))));
 
-        var actors = ImmutableDictionary<ActorId, Actor>.Empty.Add(
-            ActorId,
-            new Actor(ActorId, Capacity: 1.0m));
-
         var assignments = ImmutableArray.Create(
             new Assignment(ActorId, EnchantNodeId),
             new Assignment(ActorId, SellNodeId));
@@ -93,6 +103,7 @@ public static class MagicAgencySeed
             actors,
             assignments,
             nodeConfigs,
+            ImmutableDictionary<NodeId, double>.Empty,
             Tick: 0);
     }
 }

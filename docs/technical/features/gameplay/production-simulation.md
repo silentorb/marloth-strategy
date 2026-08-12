@@ -2,11 +2,11 @@
 
 ## Summary
 
-Authoritative production state lives in **Simulation** as an Imp-inspired node graph plus actors, assignments, and buffered port signals. Updates are **pure** functions composed of discrete batched transforms; the host stores the resulting `GameState` in a mutable variable.
+Authoritative production state lives in **Simulation** as an Imp-inspired node graph plus actors, assignments, buffered port signals, and per-node progress. Updates are **pure** functions composed of discrete batched transforms; the host stores the resulting `GameState` in a mutable variable.
 
 ## When to read this
 
-- Changing graph/signal types, tick phases, effort, or seed factories
+- Changing graph/signal types, tick phases, assignment effort, progress/cost, or seed factories
 - Implementing or testing `AdvanceTick` / `GameState`
 - Comparing Marloth’s graph model to Imp
 
@@ -18,16 +18,16 @@ Shapes follow Imp’s catalog vs instance split (ports on `NodeType`; instances 
 |-----|--------------------|
 | Data-only transmission; no evaluator | Simulation **evaluates** actions each tick |
 | DAG-oriented | **Cycles allowed** via buffered cross-tick signals |
-| No actors | **Actors** and **assignments** drive effort |
+| No actors | **Actors** and **assignments** drive assignment effort |
 | Primitive literals | Strongly typed **resource** and **information** signal values |
 
 There is no package/NuGet link to Imp; this is a C# model inspired by Imp’s graph docs.
 
 ## Numeric policy
 
-Signal payloads (`Money.Amount`, enchantment `volume` / `darkness` / `fallacy`) and node behavior numerics from config are floating-point (`double`).
+Signal payloads (`Money.Amount`, enchantment `volume` / `darkness` / `fallacy`), node config numerics (`cost`, `effort`, deltas), actor **stats**, and per-node **progress** are floating-point (`double`).
 
-Actor **capacity** and per-node **effort** remain `decimal` ratios. When converting fractional effort into a process limit, **round down** (`decimal.Floor` / toward −∞).
+Actor **capacity** and per-node **assignment effort** remain `decimal` ratios. Progress gain converts with `(double)(stat × assignmentEffort)`.
 
 Console display rounds signal numerics to nearest integers; simulation keeps exact doubles.
 
@@ -40,54 +40,65 @@ Identifiers are strings (or thin string wrappers): `NodeId`, `EdgeId`, `NodeType
 | `Port` / `NodeType` | Catalog: input/output ports + signal types |
 | `Node` / `Edge` / `PortReference` / `NodeGraph` | Instance wiring |
 | `SignalValue` | Typed payloads: resource `Money(double)` or information `Enchantment(volume, darkness, fallacy)` as `double` |
-| `Actor` | `Id`, `Capacity` (`decimal`) |
-| `Assignment` | `ActorId` → `NodeId` (many actions per actor) |
+| `Actor` | `Id`, `Capacity` (`decimal`), `Stats` (`string` → `double`) |
+| `Assignment` | Preferred `ActorId` → `NodeId` (many actions per actor) |
 | `NodeTypeConfigs` | Per-type behavior numerics loaded from JSON and attached to state |
-| `GameState` | Graph + node-type catalog + port signal map + actors + assignments + node configs + `Tick` |
+| `GameState` | Graph + catalog + port signals + actors + preferred assignments + node configs + **node progress** + `Tick` |
 
-Port signals are keyed by `(NodeId, PortId)`.
+Port signals are keyed by `(NodeId, PortId)`. Node progress is keyed by `NodeId`.
 
 ### Signal kinds
 
 | Kind | Payload | Route / merge |
 |------|---------|---------------|
 | **Resource** | Scalar quantity (`Money`) | **Add** into destination stocks; consume by subtracting |
-| **Information** | Single structure (`Enchantment`) | **Copy** along each outgoing edge; **set** on destination (no additive merge). Mutate only inside node logic |
+| **Information** | Single structure (`Enchantment`) | **Copy** along each outgoing edge; **set** on destination when empty. Mutate only inside node logic |
 
-Two information writes into the same port in one commit are exceptional (fail-fast). Empty residual plus one routed copy is the normal information commit path.
+Residuals are applied first. A routed information copy applies only if the destination is **empty** after residuals; if occupied, that edge’s copy is **skipped** (occupancy). Two routed information writes into an empty port are exceptional (fail-fast).
 
-## Effort
+## Assignment effort and prerequisites
 
-For each actor, `effortPerAssignment = Capacity / count(assignments of that actor)`.  
-Per action: `effort = sum(effort contributions of assigned actors)`.  
-Unassigned → `0`.
+Preferred assignments live on `GameState.Assignments`. Each tick, **effective** assignments are preferred rows whose target node has an enchantment on its process input port.
 
-Seed: capacity `1.0`, two assignments → `0.5` each.
+For each actor, `assignmentEffortPerNode = Capacity / count(effective assignments of that actor)`.  
+Per action: assignment effort = sum of contributions. Unassigned / not effective → `0`.
 
-Process limit: `limit = floor(baseThroughput * effort)` using each node type’s `baseThroughput` from config (seed defaults: `20`).
+Seed: when sell has no input, only enchant is effective → assignment effort `1.0` on enchant.
 
-- Resource converters (when applicable): `processed = min(available, limit)`.
-- Information nodes (`enchant`, `sell`): run when `limit >= 1` and an enchantment input is present; process **at most one** enchantment per tick.
+Progress gain on a node = sum over effectively assigned actors of `GetStat(actor, key, default) × share`, with defaults `enchanting → 1`, `sales → 1`.
+
+## Progress, config effort, and cost
+
+Each node carries runtime `progress` (`double`, default `0`).
+
+Node configs include:
+
+- **`effort`** — work units per application (seed default `10`)
+- **`cost`** — treasury money charged per successful application (seed default `20`)
+
+While `progress >= config.effort` and treasury can pay `cost`, applications run; each subtracts `config.effort` from progress and records a treasury debit.
+
+Treasury debits are collected during compute and applied in commit to `enchant.money` (order-independent). Sell still emits full payout on its money output; net treasury change is `+payout - cost`. Insufficient treasury skips that application (progress unchanged for that attempt).
 
 ## Node behaviors
 
-Tunable numerics live in `config/node-types/{enchant,sell}.json` (heterogeneous schemas). Port layouts stay in code. Seed defaults match the formulas below.
+Tunable numerics live in `config/node-types/{enchant,sell}.json` (heterogeneous schemas). Actors load from `config/actors/*.json`. Port layouts stay in code.
 
 ### `enchant`
 
-- Inputs: `enchantment` (processed), `money` (treasury stock only — never consumed).
+- Inputs: `enchantment` (processed), `money` (treasury; charged `cost` per mutation).
 - Output: `enchantment`.
-- When run: consume input enchantment; emit copy with  
-  `volume + volumeDelta`, `darkness + darknessDelta`, `fallacy + darkness + fallacyConstant` (input darkness).  
-  Defaults: `volumeDelta=10`, `darknessDelta=1`, `fallacyConstant=1`.
+- Stat: `enchanting` (default `1`).
+- With assignment effort `> 0` and an input enchantment: add progress; run mutate applications while affordable; **consume** input and **emit** either the mutated result or a **pass-through** copy of the input. Fan-out copies the emitted value only.
+- Mutation formula: `volume + volumeDelta`, `darkness + darknessDelta`, `fallacy + darkness + fallacyConstant` (defaults `10` / `1` / `1`).
 
 ### `sell`
 
 - Input: `enchantment`; output: `money`.
-- When run: consume input enchantment; produce `Money(max(payoutFloor, volume - fallacy))`.  
-  Default: `payoutFloor=0`.
+- Stat: `sales` (default `1`).
+- Add progress from assignment; when `progress >= effort` and treasury can pay `cost`, consume enchantment, produce `Money(max(payoutFloor, volume - fallacy))`, charge `cost`. Otherwise residual input, no output.
 
-## Two-phase tick
+## Tick pipeline
 
 Public API (pure):
 
@@ -99,14 +110,13 @@ ProductionTickResult AdvanceTickWithReport(GameState state);
 
 `ProductionTickResult` carries the next `GameState` plus `ImmutableArray<NodeIoRow> Nodes` (one row per node, same order as tick iteration). Each `NodeIoRow` reports the **primary** process ports (enchantment in/out for `enchant` and `sell`; money out for `sell`) with typed `SignalValue` available / residual / produced fields and whether the primary input was consumed.
 
-Stock diffs alone are not a substitute for the report under cycles (net stocks can be unchanged while nodes still process).
-
 Pipeline (each step returns new data; no mutation of prior state):
 
-1. **`ResolveInputs`** — For each action input port, take the value already committed on that port (fed by prior routing / seed). Incoming edges describe which producer output was routed there last commit; reads never use same-tick outputs from other nodes.
-2. **`ComputeOutputs`** — For each action, given resolved inputs + effort, emit outputs and input residuals via **node-type-specific** behavior. Node iteration order must not change results.
-3. **`CommitSignals`** — Build the next port signal map: residuals on inputs; for each outgoing edge, route a **copy** of the produced output onto the consumer input port (resource: add; information: set). Clear producer output ports after routing (destination inputs are the stock locations).
-4. **`NextState`** — Same structure, new signals, `Tick + 1`.
+1. **`ResolveInputs`** — For each action input port, take the value already committed on that port.
+2. **`ResolveEffectiveAssignments` / assignment effort** — Filter preferred assignments by prerequisites; split capacity.
+3. **`ComputeOutputs`** — Node-type-specific behavior using inputs, assignment effort, stats, progress, and cost. Collect treasury debits and next progress. Node iteration order must not change results.
+4. **`CommitSignals`** — Residuals; route outputs (resource add; information set if empty / skip if occupied); apply treasury debits to `enchant.money`.
+5. **`NextState`** — New signals, updated progress map, `Tick + 1`.
 
 Host pattern:
 
@@ -118,25 +128,26 @@ state = AdvanceTick(state); // mutable binding, immutable values
 
 ## Magic agency seed
 
-Factory: `MagicAgencySeed.CreateInitialState()` (loads node configs from `config/node-types/` under the app base directory; overload accepts an explicit `NodeTypeConfigs`).
+Factory: `MagicAgencySeed.CreateInitialState()` (loads node configs and actors from `config/` under the app base directory; overloads accept explicit configs/actors).
 
 - Node types: `enchant` (in `enchantment` + `money`, out `enchantment`), `sell` (in `enchantment`, out `money`).
 - Nodes: `enchant`, `sell`.
 - Edges: `enchant.enchantment` → `enchant.enchantment`; `enchant.enchantment` → `sell.enchantment`; `sell.money` → `enchant.money`.
-- Actor `A1` capacity `1.0`, assigned to both nodes.
-- Initial signals: `enchant.enchantment = (0,0,0)`, `enchant.money = 100`; `Tick = 0`.
+- Actor `intern` from JSON (capacity `1.0`, stats as configured), preferred assignments to both nodes.
+- Initial signals: `enchant.enchantment = (0,0,0)`, `enchant.money = 100`; progress empty/`0`; `Tick = 0`.
 
 ## Layout
 
 Under `src/MarlothStrategy.Simulation/`:
 
 - `Graph/` — structural Imp-like types
-- `Production/` — signals, catalog, `GameState`, seed, `AdvanceTick`, config DTOs/loader
+- `Production/` — signals, catalog, `GameState`, seed, `AdvanceTick`, config DTOs/loaders
 - `config/node-types/` — JSON behavior numerics per node type (copied to output)
+- `config/actors/` — JSON actor definitions (copied to output)
 
 ## Error handling
 
-Seed and tick assume a well-formed graph for v1 (programmer invariants). Malformed catalogs or missing node types are exceptional (`InvalidOperationException`). Missing or invalid node-type JSON at seed/boot is exceptional (fail-fast with path context). Expected empty stocks are normal (process zero / idle).
+Seed and tick assume a well-formed graph for v1 (programmer invariants). Malformed catalogs or missing node types are exceptional (`InvalidOperationException`). Missing or invalid node-type or actor JSON at seed/boot is exceptional (fail-fast with path context). Expected empty stocks and occupancy skips are normal.
 
 ## Related docs
 

@@ -27,14 +27,15 @@ public static class NodeTypeConfigLoader
         var enchant = ReadRequired<EnchantNodeConfigDto, EnchantNodeConfig>(
             Path.Combine(directory, "enchant.json"),
             dto => new EnchantNodeConfig(
-                dto.BaseThroughput,
+                dto.Cost,
+                dto.Effort,
                 dto.VolumeDelta,
                 dto.DarknessDelta,
                 dto.FallacyConstant));
 
         var sell = ReadRequired<SellNodeConfigDto, SellNodeConfig>(
             Path.Combine(directory, "sell.json"),
-            dto => new SellNodeConfig(dto.BaseThroughput, dto.PayoutFloor));
+            dto => new SellNodeConfig(dto.Cost, dto.Effort, dto.PayoutFloor));
 
         return new NodeTypeConfigs(enchant, sell);
     }
@@ -69,7 +70,10 @@ public static class NodeTypeConfigLoader
     private sealed class EnchantNodeConfigDto
     {
         [JsonRequired]
-        public double BaseThroughput { get; init; }
+        public double Cost { get; init; }
+
+        [JsonRequired]
+        public double Effort { get; init; }
 
         [JsonRequired]
         public double VolumeDelta { get; init; }
@@ -84,7 +88,10 @@ public static class NodeTypeConfigLoader
     private sealed class SellNodeConfigDto
     {
         [JsonRequired]
-        public double BaseThroughput { get; init; }
+        public double Cost { get; init; }
+
+        [JsonRequired]
+        public double Effort { get; init; }
 
         [JsonRequired]
         public double PayoutFloor { get; init; }
