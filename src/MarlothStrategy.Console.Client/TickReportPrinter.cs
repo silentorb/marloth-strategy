@@ -16,7 +16,7 @@ public static class TickReportPrinter
                      .ThenBy(p => p.Key.Port.Value, StringComparer.Ordinal))
         {
             sb.AppendLine(
-                $"  {pair.Key.Node}.{pair.Key.Port}: {FormatQuantity(pair.Value.Quantity)}");
+                $"  {pair.Key.Node}.{pair.Key.Port}: {FormatSignal(pair.Value)}");
         }
 
         return sb.ToString().TrimEnd();
@@ -29,23 +29,30 @@ public static class TickReportPrinter
         var sb = new StringBuilder();
         sb.AppendLine($"Tick {result.State.Tick}");
         sb.AppendLine(
-            $"{Pad("Node", 10)} {Pad("Effort", 8)} {Pad("Input", 22)} {Pad("Consumed", 10)} {Pad("Residual", 10)} {"Output"}");
+            $"{Pad("Node", 10)} {Pad("Effort", 8)} {Pad("Input", 28)} {Pad("Consumed", 10)} {Pad("Residual", 16)} {"Output"}");
 
         foreach (var row in result.Nodes)
         {
-            var input = $"{row.InputType.Value} {FormatQuantity(row.Available)}";
-            var output = $"{row.OutputType.Value} {FormatQuantity(row.Produced)}";
+            var input = $"{row.InputType.Value} {FormatSignal(row.Available)}";
+            var residual = FormatSignal(row.Residual);
+            var output = $"{row.OutputType.Value} {FormatSignal(row.Produced)}";
             sb.AppendLine(
-                $"{Pad(row.NodeId.Value, 10)} {Pad(FormatQuantity(row.Effort), 8)} {Pad(input, 22)} {Pad(FormatQuantity(row.Consumed), 10)} {Pad(FormatQuantity(row.Residual), 10)} {output}");
+                $"{Pad(row.NodeId.Value, 10)} {Pad(FormatEffort(row.Effort), 8)} {Pad(input, 28)} {Pad(row.Consumed ? "yes" : "no", 10)} {Pad(residual, 16)} {output}");
         }
 
         return sb.ToString().TrimEnd();
     }
 
-    private static string FormatQuantity(int value) =>
-        value.ToString(CultureInfo.InvariantCulture);
+    public static string FormatSignal(SignalValue? value) => value switch
+    {
+        null => "-",
+        SignalValue.Money m => m.Amount.ToString(CultureInfo.InvariantCulture),
+        SignalValue.Enchantment e =>
+            $"{e.Volume}/{e.Darkness}/{e.Fallacy}",
+        _ => throw new InvalidOperationException($"Unknown signal value kind: {value.GetType().Name}."),
+    };
 
-    private static string FormatQuantity(decimal value) =>
+    private static string FormatEffort(decimal value) =>
         value.ToString("0.##", CultureInfo.InvariantCulture);
 
     private static string Pad(string value, int width) =>

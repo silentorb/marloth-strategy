@@ -19,7 +19,7 @@ The ASCII console prototype runs an open-ended session: the player advances prod
   - End of stdin (EOF) exits the session.
   - When stdin is redirected (non-interactive), the same rules apply in line mode (empty line = Enter, `q` line = quit).
 - There is **no win/loss**. The player may progress indefinitely; nodes may run out of resources and stop meaningfully producing.
-- After each advanced tick, the console shows a **tabular per-node I/O report** (effort, available input, consumed, residual, produced output).
+- After each advanced tick, the console shows a **tabular per-node I/O report** (effort, available input, consumed yes/no, residual, produced output; payloads formatted by signal kind).
 - Before the first prompt, the console shows a short **starting stocks** snapshot (tick 0) so the player has a baseline.
 
 ## Related docs

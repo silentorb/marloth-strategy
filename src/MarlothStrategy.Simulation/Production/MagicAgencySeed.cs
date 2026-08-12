@@ -14,27 +14,27 @@ public static class MagicAgencySeed
     public static readonly ActorId ActorId = new("A1");
 
     public static readonly PortId MoneyPortId = new("money");
-    public static readonly PortId EnchantmentsPortId = new("enchantments");
+    public static readonly PortId EnchantmentPortId = new("enchantment");
 
     public static GameState CreateInitialState()
     {
         var moneyType = new SignalType(SignalTypes.Money);
-        var enchantmentsType = new SignalType(SignalTypes.Enchantments);
+        var enchantmentType = new SignalType(SignalTypes.Enchantment);
 
         var enchantType = new NodeType(
             EnchantTypeId,
+            ImmutableDictionary<PortId, Port>.Empty
+                .Add(EnchantmentPortId, new Port(EnchantmentPortId, enchantmentType))
+                .Add(MoneyPortId, new Port(MoneyPortId, moneyType)),
             ImmutableDictionary<PortId, Port>.Empty.Add(
-                MoneyPortId,
-                new Port(MoneyPortId, moneyType)),
-            ImmutableDictionary<PortId, Port>.Empty.Add(
-                EnchantmentsPortId,
-                new Port(EnchantmentsPortId, enchantmentsType)));
+                EnchantmentPortId,
+                new Port(EnchantmentPortId, enchantmentType)));
 
         var sellType = new NodeType(
             SellTypeId,
             ImmutableDictionary<PortId, Port>.Empty.Add(
-                EnchantmentsPortId,
-                new Port(EnchantmentsPortId, enchantmentsType)),
+                EnchantmentPortId,
+                new Port(EnchantmentPortId, enchantmentType)),
             ImmutableDictionary<PortId, Port>.Empty.Add(
                 MoneyPortId,
                 new Port(MoneyPortId, moneyType)));
@@ -50,10 +50,15 @@ public static class MagicAgencySeed
                 .Add(SellNodeId, new Node(SellNodeId, SellTypeId)),
             ImmutableDictionary<EdgeId, Edge>.Empty
                 .Add(
-                    new EdgeId("enchantments"),
+                    new EdgeId("enchantment-feedback"),
                     new Edge(
-                        new PortReference(EnchantNodeId, EnchantmentsPortId),
-                        new PortReference(SellNodeId, EnchantmentsPortId)))
+                        new PortReference(EnchantNodeId, EnchantmentPortId),
+                        new PortReference(EnchantNodeId, EnchantmentPortId)))
+                .Add(
+                    new EdgeId("enchantment-to-sell"),
+                    new Edge(
+                        new PortReference(EnchantNodeId, EnchantmentPortId),
+                        new PortReference(SellNodeId, EnchantmentPortId)))
                 .Add(
                     new EdgeId("money"),
                     new Edge(
@@ -70,11 +75,11 @@ public static class MagicAgencySeed
 
         var signals = ImmutableDictionary<PortKey, SignalValue>.Empty
             .Add(
-                new PortKey(EnchantNodeId, MoneyPortId),
-                new SignalValue.Money(100))
+                new PortKey(EnchantNodeId, EnchantmentPortId),
+                new SignalValue.Enchantment(Volume: 0, Darkness: 0, Fallacy: 0))
             .Add(
-                new PortKey(SellNodeId, EnchantmentsPortId),
-                new SignalValue.Enchantments(0));
+                new PortKey(EnchantNodeId, MoneyPortId),
+                new SignalValue.Money(100));
 
         return new GameState(
             graph,

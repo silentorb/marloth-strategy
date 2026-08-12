@@ -122,46 +122,147 @@ public static class ProductionTick
             var node = state.Graph.Nodes[nodeId];
             var nodeType = state.Catalog.Get(node.Type);
             var effort = effortByNode.GetValueOrDefault(nodeId, 0m);
-
-            if (nodeType.Inputs.Count != 1 || nodeType.Outputs.Count != 1)
-            {
-                throw new InvalidOperationException(
-                    $"Node type '{nodeType.Id}' must have exactly one input and one output in v1.");
-            }
-
-            var inputPort = nodeType.Inputs.Values.Single();
-            var outputPort = nodeType.Outputs.Values.Single();
-            var inputKey = new PortKey(nodeId, inputPort.Id);
-            var outputKey = new PortKey(nodeId, outputPort.Id);
-
-            var available = resolvedInputs.TryGetValue(inputKey, out var inputValue)
-                ? inputValue.Quantity
-                : 0;
-
             var limit = (int)decimal.Floor(BaseThroughput * effort);
-            var processed = Math.Min(available, limit);
-            if (processed < 0)
-            {
-                throw new InvalidOperationException("Processed amount must not be negative.");
-            }
 
-            var residualAmount = available - processed;
-            residuals[inputKey] = CreateSignal(inputPort.Type.Id, residualAmount);
-            outputs[outputKey] = CreateSignal(outputPort.Type.Id, processed);
-            rows.Add(new NodeIoRow(
-                nodeId,
-                effort,
-                inputPort.Id,
-                inputPort.Type.Id,
-                available,
-                processed,
-                residualAmount,
-                outputPort.Id,
-                outputPort.Type.Id,
-                processed));
+            if (node.Type == MagicAgencySeed.EnchantTypeId)
+            {
+                rows.Add(ComputeEnchant(
+                    nodeId,
+                    nodeType,
+                    effort,
+                    limit,
+                    resolvedInputs,
+                    residuals,
+                    outputs));
+            }
+            else if (node.Type == MagicAgencySeed.SellTypeId)
+            {
+                rows.Add(ComputeSell(
+                    nodeId,
+                    nodeType,
+                    effort,
+                    limit,
+                    resolvedInputs,
+                    residuals,
+                    outputs));
+            }
+            else
+            {
+                throw new InvalidOperationException($"Unsupported node type '{node.Type}'.");
+            }
         }
 
         return (residuals.ToImmutable(), outputs.ToImmutable(), rows.ToImmutable());
+    }
+
+    private static NodeIoRow ComputeEnchant(
+        NodeId nodeId,
+        NodeType nodeType,
+        decimal effort,
+        int limit,
+        ImmutableDictionary<PortKey, SignalValue> resolvedInputs,
+        ImmutableDictionary<PortKey, SignalValue>.Builder residuals,
+        ImmutableDictionary<PortKey, SignalValue>.Builder outputs)
+    {
+        var enchantmentPort = MagicAgencySeed.EnchantmentPortId;
+        var moneyPort = MagicAgencySeed.MoneyPortId;
+        var enchantmentKey = new PortKey(nodeId, enchantmentPort);
+        var moneyKey = new PortKey(nodeId, moneyPort);
+        var outputKey = new PortKey(nodeId, enchantmentPort);
+
+        if (!nodeType.Inputs.ContainsKey(enchantmentPort) ||
+            !nodeType.Inputs.ContainsKey(moneyPort) ||
+            !nodeType.Outputs.ContainsKey(enchantmentPort))
+        {
+            throw new InvalidOperationException(
+                $"Node type '{nodeType.Id}' does not match enchant port layout.");
+        }
+
+        // Money is treasury only — never consumed.
+        if (resolvedInputs.TryGetValue(moneyKey, out var money))
+        {
+            residuals[moneyKey] = money;
+        }
+
+        resolvedInputs.TryGetValue(enchantmentKey, out var available);
+        var canRun = limit >= 1 && available is SignalValue.Enchantment;
+        SignalValue? produced = null;
+        SignalValue? residual = available;
+
+        if (canRun && available is SignalValue.Enchantment enchantment)
+        {
+            produced = enchantment.Mutate();
+            residual = null;
+            outputs[outputKey] = produced;
+        }
+
+        if (residual is not null)
+        {
+            residuals[enchantmentKey] = residual;
+        }
+
+        return new NodeIoRow(
+            nodeId,
+            effort,
+            enchantmentPort,
+            SignalTypes.Enchantment,
+            available,
+            Consumed: canRun,
+            residual,
+            enchantmentPort,
+            SignalTypes.Enchantment,
+            produced);
+    }
+
+    private static NodeIoRow ComputeSell(
+        NodeId nodeId,
+        NodeType nodeType,
+        decimal effort,
+        int limit,
+        ImmutableDictionary<PortKey, SignalValue> resolvedInputs,
+        ImmutableDictionary<PortKey, SignalValue>.Builder residuals,
+        ImmutableDictionary<PortKey, SignalValue>.Builder outputs)
+    {
+        var enchantmentPort = MagicAgencySeed.EnchantmentPortId;
+        var moneyPort = MagicAgencySeed.MoneyPortId;
+        var inputKey = new PortKey(nodeId, enchantmentPort);
+        var outputKey = new PortKey(nodeId, moneyPort);
+
+        if (!nodeType.Inputs.ContainsKey(enchantmentPort) ||
+            !nodeType.Outputs.ContainsKey(moneyPort))
+        {
+            throw new InvalidOperationException(
+                $"Node type '{nodeType.Id}' does not match sell port layout.");
+        }
+
+        resolvedInputs.TryGetValue(inputKey, out var available);
+        var canRun = limit >= 1 && available is SignalValue.Enchantment;
+        SignalValue? produced = null;
+        SignalValue? residual = available;
+
+        if (canRun && available is SignalValue.Enchantment enchantment)
+        {
+            produced = new SignalValue.Money(enchantment.SellPayout());
+            residual = null;
+            outputs[outputKey] = produced;
+        }
+
+        if (residual is not null)
+        {
+            residuals[inputKey] = residual;
+        }
+
+        return new NodeIoRow(
+            nodeId,
+            effort,
+            enchantmentPort,
+            SignalTypes.Enchantment,
+            available,
+            Consumed: canRun,
+            residual,
+            moneyPort,
+            SignalTypes.Money,
+            produced);
     }
 
     private static ImmutableDictionary<PortKey, SignalValue> CommitSignals(
@@ -174,57 +275,64 @@ public static class ProductionTick
         foreach (var edge in state.Graph.Edges.Values)
         {
             var fromKey = new PortKey(edge.From.Node, edge.From.Port);
-            if (!outputs.TryGetValue(fromKey, out var produced) || produced.Quantity == 0)
+            if (!outputs.TryGetValue(fromKey, out var produced))
             {
                 continue;
             }
 
+            if (produced is SignalValue.Money { Amount: 0 })
+            {
+                continue;
+            }
+
+            var routed = produced.Copy();
             var toKey = new PortKey(edge.To.Node, edge.To.Port);
+            ValidateDestinationType(state, toKey, routed);
+
             if (next.TryGetValue(toKey, out var existing))
             {
-                if (existing.TypeId != produced.TypeId)
+                if (existing.TypeId != routed.TypeId)
                 {
                     throw new InvalidOperationException(
                         $"Signal type mismatch routing {fromKey} -> {toKey}: " +
-                        $"{produced.TypeId} vs {existing.TypeId}.");
+                        $"{routed.TypeId} vs {existing.TypeId}.");
                 }
 
-                next[toKey] = existing.AddQuantity(produced.Quantity);
+                next[toKey] = routed.Kind switch
+                {
+                    SignalKind.Resource => existing.AddResource(routed),
+                    SignalKind.Information => throw new InvalidOperationException(
+                        $"Cannot merge information signals on port {toKey}."),
+                    _ => throw new InvalidOperationException(
+                        $"Unknown signal kind '{routed.Kind}'."),
+                };
             }
             else
             {
-                // Destination port type is validated against catalog when present.
-                if (state.Graph.Nodes.TryGetValue(toKey.Node, out var toNode))
-                {
-                    var toType = state.Catalog.Get(toNode.Type);
-                    if (toType.Inputs.TryGetValue(toKey.Port, out var toPort) &&
-                        toPort.Type.Id != produced.TypeId)
-                    {
-                        throw new InvalidOperationException(
-                            $"Edge routes {produced.TypeId} into port typed {toPort.Type.Id}.");
-                    }
-                }
-
-                next[toKey] = produced;
+                next[toKey] = routed;
             }
         }
 
         return next.ToImmutable();
     }
 
-    private static SignalValue CreateSignal(SignalTypeId typeId, int amount)
+    private static void ValidateDestinationType(
+        GameState state,
+        PortKey toKey,
+        SignalValue produced)
     {
-        if (typeId == SignalTypes.Money)
+        if (!state.Graph.Nodes.TryGetValue(toKey.Node, out var toNode))
         {
-            return new SignalValue.Money(amount);
+            return;
         }
 
-        if (typeId == SignalTypes.Enchantments)
+        var toType = state.Catalog.Get(toNode.Type);
+        if (toType.Inputs.TryGetValue(toKey.Port, out var toPort) &&
+            toPort.Type.Id != produced.TypeId)
         {
-            return new SignalValue.Enchantments(amount);
+            throw new InvalidOperationException(
+                $"Edge routes {produced.TypeId} into port typed {toPort.Type.Id}.");
         }
-
-        throw new InvalidOperationException($"Unsupported signal type '{typeId}'.");
     }
 
     private static IReadOnlyList<NodeId> OrderNodes(IEnumerable<NodeId> nodeIds) =>

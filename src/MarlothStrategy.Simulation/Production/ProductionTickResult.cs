@@ -3,17 +3,21 @@ using MarlothStrategy.Simulation.Graph;
 
 namespace MarlothStrategy.Simulation.Production;
 
+/// <summary>
+/// Per-node primary process I/O for one tick. Available / residual / produced are typed signals
+/// (null = empty stock / no output).
+/// </summary>
 public sealed record NodeIoRow(
     NodeId NodeId,
     decimal Effort,
     PortId InputPort,
     SignalTypeId InputType,
-    int Available,
-    int Consumed,
-    int Residual,
+    SignalValue? Available,
+    bool Consumed,
+    SignalValue? Residual,
     PortId OutputPort,
     SignalTypeId OutputType,
-    int Produced);
+    SignalValue? Produced);
 
 public sealed record ProductionTickResult(
     GameState State,

@@ -19,9 +19,15 @@ Shapes follow Imp’s catalog vs instance split (ports on `NodeType`; instances 
 | Data-only transmission; no evaluator | Simulation **evaluates** actions each tick |
 | DAG-oriented | **Cycles allowed** via buffered cross-tick signals |
 | No actors | **Actors** and **assignments** drive effort |
-| Primitive literals | Strongly typed **resource** signal values (extensible later) |
+| Primitive literals | Strongly typed **resource** and **information** signal values |
 
 There is no package/NuGet link to Imp; this is a C# model inspired by Imp’s graph docs.
+
+## Numeric policy
+
+All numeric values in simulation **data** are **`int`**, unless explicitly documented otherwise.
+
+**Exception:** actor **capacity** and per-node **effort** remain `decimal` ratios. When converting fractional effort into a process limit, **round down** (`decimal.Floor` / toward −∞).
 
 ## Core types
 
@@ -31,12 +37,21 @@ Identifiers are strings (or thin string wrappers): `NodeId`, `EdgeId`, `NodeType
 |------|------|
 | `Port` / `NodeType` | Catalog: input/output ports + signal types |
 | `Node` / `Edge` / `PortReference` / `NodeGraph` | Instance wiring |
-| `SignalValue` | Typed quantities (v1: `Money`, `Enchantments` as ints) |
-| `Actor` | `Id`, `Capacity` |
+| `SignalValue` | Typed payloads: resource `Money(int)` or information `Enchantment(volume, darkness, fallacy)` |
+| `Actor` | `Id`, `Capacity` (`decimal`) |
 | `Assignment` | `ActorId` → `NodeId` (many actions per actor) |
 | `GameState` | Graph + node-type catalog + port signal map + actors + assignments + `Tick` |
 
 Port signals are keyed by `(NodeId, PortId)`.
+
+### Signal kinds
+
+| Kind | Payload | Route / merge |
+|------|---------|---------------|
+| **Resource** | Scalar quantity (`Money`) | **Add** into destination stocks; consume by subtracting |
+| **Information** | Single structure (`Enchantment`) | **Copy** along each outgoing edge; **set** on destination (no additive merge). Mutate only inside node logic |
+
+Two information writes into the same port in one commit are exceptional (fail-fast). Empty residual plus one routed copy is the normal information commit path.
 
 ## Effort
 
@@ -46,9 +61,24 @@ Unassigned → `0`.
 
 Seed: capacity `1.0`, two assignments → `0.5` each.
 
-Throughput: `processed = min(availableInput, floor(BaseThroughput * effort))` with `BaseThroughput = 20` and 1:1 conversion. Residual unconsumed input stays on the input port.
+Process limit: `limit = floor(BaseThroughput * effort)` with `BaseThroughput = 20`.
 
-**Rounding:** whenever a fractional intermediate becomes an int signal amount or process limit, **round down** (`decimal.Floor` / toward −∞). Effort and capacity remain decimals; only the conversion into processable units floors.
+- Resource converters (when applicable): `processed = min(available, limit)`.
+- Information nodes (`enchant`, `sell`): run when `limit >= 1` and an enchantment input is present; process **at most one** enchantment per tick.
+
+## Node behaviors
+
+### `enchant`
+
+- Inputs: `enchantment` (processed), `money` (treasury stock only — never consumed).
+- Output: `enchantment`.
+- When run: consume input enchantment; emit copy with  
+  `volume + 10`, `darkness + 1`, `fallacy + darkness + 1` (input darkness).
+
+### `sell`
+
+- Input: `enchantment`; output: `money`.
+- When run: consume input enchantment; produce `Money(max(0, volume - fallacy))`.
 
 ## Two-phase tick
 
@@ -60,15 +90,15 @@ ProductionTickResult AdvanceTickWithReport(GameState state);
 // AdvanceTick(state) => AdvanceTickWithReport(state).State;
 ```
 
-`ProductionTickResult` carries the next `GameState` plus `ImmutableArray<NodeIoRow> Nodes` (one row per node, same order as tick iteration). Each `NodeIoRow` (v1: exactly one input and one output per node type) includes: `NodeId`, `Effort`, input port / signal type / `Available` / `Consumed` / `Residual`, output port / signal type / `Produced`.
+`ProductionTickResult` carries the next `GameState` plus `ImmutableArray<NodeIoRow> Nodes` (one row per node, same order as tick iteration). Each `NodeIoRow` reports the **primary** process ports (enchantment in/out for `enchant` and `sell`; money out for `sell`) with typed `SignalValue` available / residual / produced fields and whether the primary input was consumed.
 
 Stock diffs alone are not a substitute for the report under cycles (net stocks can be unchanged while nodes still process).
 
 Pipeline (each step returns new data; no mutation of prior state):
 
 1. **`ResolveInputs`** — For each action input port, take the value already committed on that port (fed by prior routing / seed). Incoming edges describe which producer output was routed there last commit; reads never use same-tick outputs from other nodes.
-2. **`ComputeOutputs`** — For each action, given resolved inputs + effort, emit output amounts and input residuals. Node iteration order must not change results.
-3. **`CommitSignals`** — Build the next port signal map: residuals on inputs; route each produced output along outgoing edges onto consumer input ports (additive if multiple edges target the same port—seed has one edge per resource). Clear producer output ports after routing (or store only on destination inputs—implementation keeps destination inputs as the stock locations).
+2. **`ComputeOutputs`** — For each action, given resolved inputs + effort, emit outputs and input residuals via **node-type-specific** behavior. Node iteration order must not change results.
+3. **`CommitSignals`** — Build the next port signal map: residuals on inputs; for each outgoing edge, route a **copy** of the produced output onto the consumer input port (resource: add; information: set). Clear producer output ports after routing (destination inputs are the stock locations).
 4. **`NextState`** — Same structure, new signals, `Tick + 1`.
 
 Host pattern:
@@ -83,11 +113,11 @@ state = AdvanceTick(state); // mutable binding, immutable values
 
 Factory: `MagicAgencySeed.CreateInitialState()`.
 
-- Node types: `enchant` (in `money`, out `enchantments`), `sell` (in `enchantments`, out `money`).
+- Node types: `enchant` (in `enchantment` + `money`, out `enchantment`), `sell` (in `enchantment`, out `money`).
 - Nodes: `enchant`, `sell`.
-- Edges: `enchant.enchantments` → `sell.enchantments`; `sell.money` → `enchant.money`.
+- Edges: `enchant.enchantment` → `enchant.enchantment`; `enchant.enchantment` → `sell.enchantment`; `sell.money` → `enchant.money`.
 - Actor `A1` capacity `1.0`, assigned to both nodes.
-- Initial signals: `enchant.money = 100`, `sell.enchantments = 0`; `Tick = 0`.
+- Initial signals: `enchant.enchantment = (0,0,0)`, `enchant.money = 100`; `Tick = 0`.
 
 ## Layout
 
@@ -98,7 +128,7 @@ Under `src/MarlothStrategy.Simulation/`:
 
 ## Error handling
 
-Seed and tick assume a well-formed graph for v1 (programmer invariants). Malformed catalogs or missing node types are exceptional (`InvalidOperationException`). Expected empty stocks are normal (process zero).
+Seed and tick assume a well-formed graph for v1 (programmer invariants). Malformed catalogs or missing node types are exceptional (`InvalidOperationException`). Expected empty stocks are normal (process zero / idle).
 
 ## Related docs
 

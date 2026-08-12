@@ -27,10 +27,10 @@ After each advanced tick, print a header `Tick N` and a fixed-width table:
 |--------|--------|
 | Node | `NodeIoRow.NodeId` |
 | Effort | `NodeIoRow.Effort` |
-| Input | input signal type + available quantity |
-| Consumed | `NodeIoRow.Consumed` |
-| Residual | `NodeIoRow.Residual` |
-| Output | output signal type + produced quantity |
+| Input | input signal type + available payload (`money` amount, or enchantment `vol/dark/fall`, or `-` if empty) |
+| Consumed | `yes` / `no` (`NodeIoRow.Consumed`) |
+| Residual | residual payload or `-` |
+| Output | output signal type + produced payload (or `-`) |
 
 Node row order matches Simulation’s tick iteration order.
 

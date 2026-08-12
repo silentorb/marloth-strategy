@@ -7,14 +7,14 @@ namespace MarlothStrategy.Console.Client.Tests;
 public sealed class TickReportPrinterTests
 {
     [Fact]
-    public void FormatStartingStocks_IncludesTickAndPortQuantities()
+    public void FormatStartingStocks_IncludesTickAndPortSignals()
     {
         var state = MagicAgencySeed.CreateInitialState();
         var text = TickReportPrinter.FormatStartingStocks(state);
 
         Assert.Contains("Starting stocks (tick 0)", text);
+        Assert.Contains("enchant.enchantment: 0/0/0", text);
         Assert.Contains("enchant.money: 100", text);
-        Assert.Contains("sell.enchantments: 0", text);
     }
 
     [Fact]
@@ -26,25 +26,25 @@ public sealed class TickReportPrinterTests
                 new NodeIoRow(
                     MagicAgencySeed.EnchantNodeId,
                     0.5m,
-                    MagicAgencySeed.MoneyPortId,
-                    SignalTypes.Money,
-                    100,
-                    10,
-                    90,
-                    MagicAgencySeed.EnchantmentsPortId,
-                    SignalTypes.Enchantments,
-                    10),
+                    MagicAgencySeed.EnchantmentPortId,
+                    SignalTypes.Enchantment,
+                    new SignalValue.Enchantment(0, 0, 0),
+                    Consumed: true,
+                    Residual: null,
+                    MagicAgencySeed.EnchantmentPortId,
+                    SignalTypes.Enchantment,
+                    new SignalValue.Enchantment(10, 1, 1)),
                 new NodeIoRow(
                     MagicAgencySeed.SellNodeId,
                     0.5m,
-                    MagicAgencySeed.EnchantmentsPortId,
-                    SignalTypes.Enchantments,
-                    0,
-                    0,
-                    0,
+                    MagicAgencySeed.EnchantmentPortId,
+                    SignalTypes.Enchantment,
+                    Available: null,
+                    Consumed: false,
+                    Residual: null,
                     MagicAgencySeed.MoneyPortId,
                     SignalTypes.Money,
-                    0)));
+                    Produced: null)));
 
         var text = TickReportPrinter.FormatTickReport(result);
 
@@ -57,8 +57,10 @@ public sealed class TickReportPrinterTests
         Assert.Contains("Output", text);
         Assert.Contains("enchant", text);
         Assert.Contains("sell", text);
-        Assert.Contains("money 100", text);
-        Assert.Contains("enchantments 10", text);
+        Assert.Contains("enchantment 0/0/0", text);
+        Assert.Contains("enchantment 10/1/1", text);
         Assert.Contains("0.5", text);
+        Assert.Contains("yes", text);
+        Assert.Contains("no", text);
     }
 }
