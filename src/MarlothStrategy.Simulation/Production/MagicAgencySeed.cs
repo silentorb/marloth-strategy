@@ -7,9 +7,13 @@ public static class MagicAgencySeed
 {
     public static readonly NodeTypeId EnchantTypeId = new("enchant");
     public static readonly NodeTypeId SellTypeId = new("sell");
+    public static readonly NodeTypeId TreasuryTypeId = new("treasury");
+    public static readonly NodeTypeId PayrollTypeId = new("payroll");
 
     public static readonly NodeId EnchantNodeId = new("enchant");
     public static readonly NodeId SellNodeId = new("sell");
+    public static readonly NodeId TreasuryNodeId = new("treasury");
+    public static readonly NodeId PayrollNodeId = new("payroll");
 
     public static readonly ActorId ActorId = new("intern");
 
@@ -37,36 +41,54 @@ public static class MagicAgencySeed
                 $"Magic agency seed requires actor '{ActorId}'.");
         }
 
+        if (nodeConfigs.Payroll.Period <= 0)
+        {
+            throw new InvalidOperationException(
+                "Payroll period must be a positive integer.");
+        }
+
         var moneyType = new SignalType(SignalTypes.Money);
         var enchantmentType = new SignalType(SignalTypes.Enchantment);
 
         var enchantType = new NodeType(
             EnchantTypeId,
             ImmutableDictionary<PortId, Port>.Empty
-                .Add(EnchantmentPortId, new Port(EnchantmentPortId, enchantmentType))
-                .Add(MoneyPortId, new Port(MoneyPortId, moneyType)),
+                .Add(EnchantmentPortId, new Port(EnchantmentPortId, enchantmentType)),
             ImmutableDictionary<PortId, Port>.Empty
-                .Add(EnchantmentPortId, new Port(EnchantmentPortId, enchantmentType))
-                .Add(MoneyPortId, new Port(MoneyPortId, moneyType)));
+                .Add(EnchantmentPortId, new Port(EnchantmentPortId, enchantmentType)));
 
         var sellType = new NodeType(
             SellTypeId,
             ImmutableDictionary<PortId, Port>.Empty
-                .Add(EnchantmentPortId, new Port(EnchantmentPortId, enchantmentType))
-                .Add(MoneyPortId, new Port(MoneyPortId, moneyType)),
+                .Add(EnchantmentPortId, new Port(EnchantmentPortId, enchantmentType)),
             ImmutableDictionary<PortId, Port>.Empty.Add(
                 MoneyPortId,
                 new Port(MoneyPortId, moneyType)));
 
+        var treasuryType = new NodeType(
+            TreasuryTypeId,
+            ImmutableDictionary<PortId, Port>.Empty
+                .Add(MoneyPortId, new Port(MoneyPortId, moneyType)),
+            ImmutableDictionary<PortId, Port>.Empty);
+
+        var payrollType = new NodeType(
+            PayrollTypeId,
+            ImmutableDictionary<PortId, Port>.Empty,
+            ImmutableDictionary<PortId, Port>.Empty);
+
         var catalog = new NodeTypeCatalog(
             ImmutableDictionary<NodeTypeId, NodeType>.Empty
                 .Add(EnchantTypeId, enchantType)
-                .Add(SellTypeId, sellType));
+                .Add(SellTypeId, sellType)
+                .Add(TreasuryTypeId, treasuryType)
+                .Add(PayrollTypeId, payrollType));
 
         var graph = new NodeGraph(
             ImmutableDictionary<NodeId, Node>.Empty
                 .Add(EnchantNodeId, new Node(EnchantNodeId, EnchantTypeId))
-                .Add(SellNodeId, new Node(SellNodeId, SellTypeId)),
+                .Add(SellNodeId, new Node(SellNodeId, SellTypeId))
+                .Add(TreasuryNodeId, new Node(TreasuryNodeId, TreasuryTypeId))
+                .Add(PayrollNodeId, new Node(PayrollNodeId, PayrollTypeId)),
             ImmutableDictionary<EdgeId, Edge>.Empty
                 .Add(
                     new EdgeId("enchantment-feedback"),
@@ -79,15 +101,10 @@ public static class MagicAgencySeed
                         new PortReference(EnchantNodeId, EnchantmentPortId),
                         new PortReference(SellNodeId, EnchantmentPortId)))
                 .Add(
-                    new EdgeId("money-to-sell"),
-                    new Edge(
-                        new PortReference(EnchantNodeId, MoneyPortId),
-                        new PortReference(SellNodeId, MoneyPortId)))
-                .Add(
-                    new EdgeId("money-to-enchant"),
+                    new EdgeId("money-to-treasury"),
                     new Edge(
                         new PortReference(SellNodeId, MoneyPortId),
-                        new PortReference(EnchantNodeId, MoneyPortId))));
+                        new PortReference(TreasuryNodeId, MoneyPortId))));
 
         var assignments = ImmutableArray.Create(
             new Assignment(ActorId, EnchantNodeId),
@@ -98,8 +115,11 @@ public static class MagicAgencySeed
                 new PortKey(EnchantNodeId, EnchantmentPortId),
                 new SignalValue.Enchantment(Volume: 0, Darkness: 0, Fallacy: 0))
             .Add(
-                new PortKey(EnchantNodeId, MoneyPortId),
+                new PortKey(TreasuryNodeId, MoneyPortId),
                 new SignalValue.Money(100));
+
+        var timers = ImmutableDictionary<NodeId, int>.Empty
+            .Add(PayrollNodeId, nodeConfigs.Payroll.Period);
 
         return new GameState(
             graph,
@@ -109,6 +129,7 @@ public static class MagicAgencySeed
             assignments,
             nodeConfigs,
             ImmutableDictionary<NodeId, double>.Empty,
+            timers,
             Tick: 0);
     }
 }

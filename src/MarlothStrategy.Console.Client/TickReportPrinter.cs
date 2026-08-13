@@ -16,13 +16,13 @@ public static class TickReportPrinter
         ProductionTickResult? tick = null)
     {
         ArgumentNullException.ThrowIfNull(state);
+        _ = tick;
 
         var sb = new StringBuilder();
         sb.AppendLine($"## Tick {state.Tick}");
         sb.AppendLine();
-
-        var rowsByNode = tick?.Nodes.ToDictionary(r => r.NodeId) ??
-            new Dictionary<NodeId, NodeIoRow>();
+        AppendActorsLine(sb, state, previous);
+        sb.AppendLine();
 
         var nodes = state.Graph.Nodes.Keys
             .OrderBy(id => id.Value, StringComparer.Ordinal)
@@ -35,8 +35,7 @@ public static class TickReportPrinter
                 sb.AppendLine();
             }
 
-            rowsByNode.TryGetValue(nodes[i], out var row);
-            AppendNodeBlock(sb, state, previous, nodes[i], row);
+            AppendNodeBlock(sb, state, previous, nodes[i]);
         }
 
         return sb.ToString().TrimEnd();
@@ -51,12 +50,36 @@ public static class TickReportPrinter
         _ => throw new InvalidOperationException($"Unknown signal value kind: {value.GetType().Name}."),
     };
 
+    private static void AppendActorsLine(StringBuilder sb, GameState state, GameState? previous)
+    {
+        var current = FormatActorRoster(state.Actors);
+        if (previous is null)
+        {
+            sb.AppendLine($"actors: {current}");
+            return;
+        }
+
+        var prior = FormatActorRoster(previous.Actors);
+        sb.AppendLine($"actors: {FormatChange(prior, current)}");
+    }
+
+    private static string FormatActorRoster(ImmutableDictionary<ActorId, Actor> actors)
+    {
+        if (actors.IsEmpty)
+        {
+            return "0";
+        }
+
+        return string.Join(
+            ", ",
+            actors.Keys.OrderBy(id => id.Value, StringComparer.Ordinal).Select(id => id.Value));
+    }
+
     private static void AppendNodeBlock(
         StringBuilder sb,
         GameState state,
         GameState? previous,
-        NodeId nodeId,
-        NodeIoRow? tickRow)
+        NodeId nodeId)
     {
         sb.AppendLine($"{nodeId.Value}:");
 
@@ -73,7 +96,26 @@ public static class TickReportPrinter
             var port = nodeType.Inputs.TryGetValue(portId, out var inputPort)
                 ? inputPort
                 : nodeType.Outputs[portId];
-            AppendPort(sb, state, previous, nodeId, port, tickRow);
+            AppendPort(sb, state, previous, nodeId, port);
+        }
+
+        if (ShowsTimer(node.Type))
+        {
+            var timer = FormatInt(state.NodeTimers.GetValueOrDefault(nodeId, 0));
+            if (previous is null)
+            {
+                sb.AppendLine($"  timer: {timer}");
+            }
+            else
+            {
+                var priorTimer = FormatInt(previous.NodeTimers.GetValueOrDefault(nodeId, 0));
+                sb.AppendLine($"  timer: {FormatChange(priorTimer, timer)}");
+            }
+        }
+
+        if (!ShowsProgress(node.Type))
+        {
+            return;
         }
 
         var progress = FormatRounded(state.NodeProgress.GetValueOrDefault(nodeId, 0));
@@ -87,13 +129,18 @@ public static class TickReportPrinter
         sb.AppendLine($"  progress: {FormatChange(priorProgress, progress)}");
     }
 
+    private static bool ShowsProgress(NodeTypeId typeId) =>
+        typeId == MagicAgencySeed.EnchantTypeId || typeId == MagicAgencySeed.SellTypeId;
+
+    private static bool ShowsTimer(NodeTypeId typeId) =>
+        typeId == MagicAgencySeed.PayrollTypeId;
+
     private static void AppendPort(
         StringBuilder sb,
         GameState state,
         GameState? previous,
         NodeId nodeId,
-        Port port,
-        NodeIoRow? tickRow)
+        Port port)
     {
         var key = new PortKey(nodeId, port.Id);
         var current = state.PortSignals.GetValueOrDefault(key);
@@ -102,15 +149,6 @@ public static class TickReportPrinter
 
         if (kind == SignalKind.Resource)
         {
-            // Money is a continuous transform through the node, not per-node ownership.
-            if (previous is not null &&
-                tickRow is { MoneyIn: { } moneyIn, MoneyOut: { } moneyOut })
-            {
-                sb.AppendLine(
-                    $"  {port.Id.Value}: {FormatChange(FormatRounded(moneyIn), FormatRounded(moneyOut))}");
-                return;
-            }
-
             var currentText = FormatResourceLeaf(current);
             if (previous is null)
             {
@@ -195,4 +233,7 @@ public static class TickReportPrinter
 
     private static string FormatRounded(double value) =>
         Math.Round(value, MidpointRounding.AwayFromZero).ToString(CultureInfo.InvariantCulture);
+
+    private static string FormatInt(int value) =>
+        value.ToString(CultureInfo.InvariantCulture);
 }

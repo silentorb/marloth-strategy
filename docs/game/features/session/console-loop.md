@@ -19,7 +19,7 @@ The ASCII console prototype runs an open-ended session: the player advances prod
   - End of stdin (EOF) exits the session.
   - When stdin is redirected (non-interactive), the same rules apply in line mode (empty line = Enter, `q` line = quit).
 - There is **no win/loss**. The player may progress indefinitely; nodes may run out of resources and stop meaningfully producing.
-- After each advanced tick, the console shows a **YAML-like per-node snapshot** of port stocks and progress. Leaf values that changed this tick are annotated as `previous → current` (Unicode right arrow). Unchanged leaves show the current value only.
+- After each advanced tick, the console shows a **YAML-like snapshot**: an `actors:` roster line, then per-node port stocks, progress (process nodes), and payroll timer. Leaf values that changed this tick are annotated as `previous → current` (Unicode right arrow). Unchanged leaves show the current value only.
 - Before the first prompt, the console shows the same snapshot for **tick 0** (no change arrows) so the player has a baseline.
 
 ## Related docs

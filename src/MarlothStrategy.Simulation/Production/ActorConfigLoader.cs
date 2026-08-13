@@ -71,7 +71,7 @@ public static class ActorConfigLoader
                 ? ImmutableDictionary<string, double>.Empty
                 : dto.Stats.ToImmutableDictionary(StringComparer.Ordinal);
 
-            return new Actor(new ActorId(dto.Id), dto.Capacity, stats);
+            return new Actor(new ActorId(dto.Id), dto.Capacity, stats, dto.Wage);
         }
         catch (JsonException ex)
         {
@@ -90,5 +90,7 @@ public static class ActorConfigLoader
         public decimal Capacity { get; init; }
 
         public Dictionary<string, double>? Stats { get; init; }
+
+        public double? Wage { get; init; }
     }
 }

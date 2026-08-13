@@ -27,7 +27,6 @@ public static class NodeTypeConfigLoader
         var enchant = ReadRequired<EnchantNodeConfigDto, EnchantNodeConfig>(
             Path.Combine(directory, "enchant.json"),
             dto => new EnchantNodeConfig(
-                dto.Cost,
                 dto.Effort,
                 dto.VolumeDelta,
                 dto.DarknessDelta,
@@ -37,7 +36,11 @@ public static class NodeTypeConfigLoader
             Path.Combine(directory, "sell.json"),
             dto => new SellNodeConfig(dto.Effort, dto.PayoutFloor));
 
-        return new NodeTypeConfigs(enchant, sell);
+        var payroll = ReadRequired<PayrollNodeConfigDto, PayrollNodeConfig>(
+            Path.Combine(directory, "payroll.json"),
+            dto => new PayrollNodeConfig(dto.DefaultWage, dto.Period));
+
+        return new NodeTypeConfigs(enchant, sell, payroll);
     }
 
     private static TConfig ReadRequired<TDto, TConfig>(
@@ -70,9 +73,6 @@ public static class NodeTypeConfigLoader
     private sealed class EnchantNodeConfigDto
     {
         [JsonRequired]
-        public double Cost { get; init; }
-
-        [JsonRequired]
         public double Effort { get; init; }
 
         [JsonRequired]
@@ -92,5 +92,14 @@ public static class NodeTypeConfigLoader
 
         [JsonRequired]
         public double PayoutFloor { get; init; }
+    }
+
+    private sealed class PayrollNodeConfigDto
+    {
+        [JsonRequired]
+        public double DefaultWage { get; init; }
+
+        [JsonRequired]
+        public int Period { get; init; }
     }
 }

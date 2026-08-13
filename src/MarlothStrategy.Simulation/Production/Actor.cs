@@ -11,6 +11,7 @@ public readonly record struct ActorId(string Value)
 public sealed record Actor(
     ActorId Id,
     decimal Capacity,
-    ImmutableDictionary<string, double> Stats);
+    ImmutableDictionary<string, double> Stats,
+    double? Wage = null);
 
 public sealed record Assignment(ActorId ActorId, NodeId NodeId);
