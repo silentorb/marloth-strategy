@@ -14,7 +14,8 @@ public sealed class FlowGraphPrinterTests
         new TestingNodeConfig(Effort: 10, FallacyReduction: 5),
         new SellNodeConfig(Effort: 10, PayoutFloor: 0),
         new TreasuryNodeConfig(Effort: 2),
-        new PayrollNodeConfig(DefaultWage: 10, Period: 5, Effort: 5));
+        new PayrollNodeConfig(DefaultWage: 10, Period: 5, Effort: 5),
+        new MergeNodeConfig(Effort: 5));
 
     private static readonly ImmutableDictionary<ActorId, Actor> DefaultActors =
         ImmutableDictionary<ActorId, Actor>.Empty.Add(
@@ -27,7 +28,7 @@ public sealed class FlowGraphPrinterTests
                     .Add(ActorStatKeys.Sales, 10)));
 
     [Fact]
-    public void FormatLines_SeedGraph_ShowsMainChainSelfLoopAndPayroll()
+    public void FormatLines_SeedGraph_ShowsMergeFeedbackAndPayroll()
     {
         var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors);
         var lines = FlowGraphPrinter.FormatLines(state);
@@ -35,20 +36,11 @@ public sealed class FlowGraphPrinterTests
 
         Assert.Contains("enchant", text);
         Assert.Contains("testing", text);
+        Assert.Contains("merge", text);
         Assert.Contains("sell", text);
         Assert.Contains("treasury", text);
         Assert.Contains("payroll", text);
-        Assert.Contains("──┐", text); // self-loop annotation on enchant
         Assert.Contains("▼", text);
-
-        var enchantAt = text.IndexOf("enchant", StringComparison.Ordinal);
-        var testingAt = text.IndexOf("testing", StringComparison.Ordinal);
-        var sellAt = text.IndexOf("sell", StringComparison.Ordinal);
-        var treasuryAt = text.IndexOf("treasury", StringComparison.Ordinal);
-        var payrollAt = text.IndexOf("payroll", StringComparison.Ordinal);
-        Assert.True(enchantAt >= 0 && testingAt > enchantAt);
-        Assert.True(sellAt > testingAt);
-        Assert.True(treasuryAt > sellAt);
-        Assert.True(payrollAt > treasuryAt);
+        Assert.Contains("merge → enchant", text);
     }
 }

@@ -20,11 +20,12 @@ The first domain is a **magic agency** that creates enchantments as a service.
 | Kind | Behavior | Example |
 |------|----------|---------|
 | **Resource** | Primitive scalar. **Money** is owned on the node that holds it; routing toward treasury **enqueues** pending moves (applied by treasury progress) | **money** (quantity) |
-| **Information** | Complex structure; **copied** on route and **mutated** only inside node logic | **enchantment** (single value with `volume`, `darkness`, `fallacy`) |
+| **Information** | Complex structure; **copied** on route and **mutated** only inside node logic | **enchantment** (content-addressed block with discrete `volume` / `darkness` / `fallacy` unit sets) |
 
-- Money signals carry a quantity of money owned at a port. Enchantment signals carry a **single** enchantment (not a count).
+- Money signals carry a quantity of money owned at a port. Enchantment signals carry a **single** enchantment block (not a count of enchantments). Aggregate numeric size is the count of units in each property.
 - Nodes consume input signals and produce output signals each production tick according to their rules.
 - Routing and fan-out only **copy** emitted values; they never mutate information.
+- Each enchantment modification creates a new **block** with a content hash of its parent hash plus unit sets. Game state keeps a map of hash → block for ancestry.
 
 ## Actors, stats, wages, and assignment
 
@@ -33,6 +34,7 @@ The first domain is a **magic agency** that creates enchantments as a service.
 - **Every** seed node type uses a progress system and requires an actor to apply work (payroll’s **timer** alone is the exception—see payroll below).
 - Prerequisites:
   - `enchant` / `testing` / `sell`: an enchantment on the process input
+  - `merge`: enchantments on both `primary` and `secondary` inputs
   - `treasury`: at least one pending money move
   - `payroll`: payday due (timer remaining is `0`)
 - When an actor has multiple effective assignments, capacity is split equally: **assignment effort** = `capacity / effective count` for that actor. Efforts from several actors on one node **add**.
@@ -46,8 +48,9 @@ Do not use “man/manning” in product language; use **assignment** / **assigne
 - Every seed node tracks runtime **progress** (carried across ticks).
 - Node config **`effort`** is the base work units required per application. Each node type may use a different effort.
 - While progress covers the required work for an application, the node may apply one or more times in a tick; each application subtracts its required work from progress.
-- **`enchant`:** with assignment effort and an input enchantment, the node always forwards the enchantment—either **mutate** or **pass-through**. Required work per mutation is `effort + enchantment.darkness` (darkness on the value being mutated; recomputed after each mutate in the same tick). No money ports.
-- **`testing`:** with assignment effort and an input enchantment, always forwards the enchantment. Each completed application reduces fallacy by `fallacyReduction ×` (number of actors effectively assigned to testing that tick), floored at `0`. Pass-through when under effort.
+- **`enchant`:** with assignment effort and an input enchantment, the node always forwards the enchantment—either **mutate** or **pass-through**. Required work per mutation is `effort + enchantment.darkness` (darkness **unit count** on the value being mutated; recomputed after each mutate in the same tick). No money ports.
+- **`testing`:** with assignment effort and an input enchantment, always forwards the enchantment. Each completed application removes `fallacyReduction ×` (number of actors effectively assigned to testing that tick) **discrete fallacy units** (lowest ids first), floored at empty. Pass-through when under effort.
+- **`merge`:** with assignment effort and both `primary` and `secondary` enchantment inputs, consumes both and emits one resolved block when progress covers `effort`. Same hash → that block; if one is in the other’s parent chain → newer tip (fast-forward, no new block); no common ancestor → **primary**; otherwise three-way unit merge into a new block (parent = primary). Under effort: residual both inputs.
 - **`sell`:** when progress allows (`effort`), consume the enchantment and **emit** the sale payout on its money output. Otherwise leave the enchantment as residual and emit no money. Routed money toward treasury becomes a **pending inbound** move (not immediately added to the pile).
 - **`treasury`:** holds agency money on its `money` input/output port (committed pile on the input; successful out-moves **emit** on the output for edge routing). Config `effort` (seed `2`) per **one** pending money move (in or out). Assigned actors gain progress while the pending queue is non-empty; each application dequeues one move and applies it to the committed pile (in adds; out debits or mass-quits if short).
 - **`payroll`:** `money` **input** (receives routed wage payouts; does not hold stock across ticks—disbursed/consumed). Config `defaultWage`, `period`, and `effort` (seed `5`). **Timer** decrements every tick with no actor (`remaining > 0` → subtract 1). When `remaining == 0`, payday is **due**. Payday application (actor + progress ≥ effort) **enqueues** a pending money-out for the wage total when a funding edge exists from a treasury `money` port to this payroll `money` input, and resets the timer to `period`; it does **not** debit treasury. Empty roster / wage total `0` resets the timer without enqueueing. Shortfall is checked when treasury executes the out-move: if the pile cannot cover **all** wages, **no partial pay**—pile unchanged by that move, out-move dropped, **all actors quit**.
@@ -63,17 +66,18 @@ Do not use “man/manning” in product language; use **assignment** / **assigne
 | Piece | Detail |
 |-------|--------|
 | Actors | One actor (`intern`), capacity `1.0`, stats `enchanting: 10`, `sales: 10`, no explicit wage (from `config/actors/intern.json`) |
-| Nodes | `enchant` — mutate or pass-through; `testing` — reduce fallacy; `sell` — consume enchantment, emit payout; `treasury` — store money via pending moves; `payroll` — timer + payday enqueue + money input |
-| Enchant formula | On each mutation: `volume + volumeDelta`, `darkness + darknessDelta`, `fallacy + darkness + fallacyConstant` (defaults `10` / `1` / `1`). Required work: `effort + darkness` |
-| Testing formula | On each application: `fallacy = max(0, fallacy - fallacyReduction × effectiveActorCount)` (defaults `effort: 10`, `fallacyReduction: 5`) |
-| Sell formula | payout = `max(payoutFloor, volume - fallacy)` (default `payoutFloor=0`) |
-| Graph | Enchantment **fans out**: copy `enchant` → `enchant` (feedback) and copy `enchant` → `testing`; copy `testing` → `sell`; money: `sell.money` → treasury pending inbound; `treasury.money` → `payroll.money` (wage funding / out settlement route) |
-| Assignment | Preferred: `intern` → `enchant`, `testing`, `sell`, `treasury`, `payroll`; effective set filtered by prerequisites |
-| Work / payroll | Config `effort: 10` on enchant/testing/sell; treasury `effort: 2`; payroll `defaultWage: 10`, `period: 5`, `effort: 5`; progress gain uses actor stats × assignment effort |
-| Config | Node numerics in `config/node-types/{enchant,testing,sell,treasury,payroll}.json`; actors in `config/actors/*.json`; port layouts and seed wiring stay in code |
-| Starting stocks | Seed primes ports: `enchant` enchantment = `(volume:0, darkness:0, fallacy:0)`; `treasury` money = `100`; sell/testing empty; payroll timer = `period`; pending money moves empty; node progress `0` |
+| Nodes | `enchant` — mutate or pass-through; `testing` — remove fallacy units; `merge` — combine primary/secondary branches; `sell` — consume enchantment, emit payout; `treasury` — store money via pending moves; `payroll` — timer + payday enqueue + money input |
+| Enchant formula | On each mutation: append `volumeDelta` volume units, `darknessDelta` darkness units, and `(darknessCount + fallacyConstant)` fallacy units (defaults `10` / `1` / `1`). Required work: `effort + darknessCount` |
+| Testing formula | On each application: remove `fallacyReduction × effectiveActorCount` fallacy units by ascending id (defaults `effort: 10`, `fallacyReduction: 5`) |
+| Merge formula | Effort `5` (lower than enchant). Fast-forward / primary-on-divergence / else three-way set merge per property: omit ancestor units missing from either side; otherwise union |
+| Sell formula | payout = `max(payoutFloor, volumeCount - fallacyCount)` (default `payoutFloor=0`) |
+| Graph | Enchantment **fans out**: `enchant` → `testing` and `enchant` → `merge.primary`; `testing` → `sell` and `testing` → `merge.secondary`; `merge` → `enchant`; money: `sell.money` → treasury pending inbound; `treasury.money` → `payroll.money` |
+| Assignment | Preferred: `intern` → `enchant`, `testing`, `merge`, `sell`, `treasury`, `payroll`; effective set filtered by prerequisites |
+| Work / payroll | Config `effort: 10` on enchant/testing/sell; merge `effort: 5`; treasury `effort: 2`; payroll `defaultWage: 10`, `period: 5`, `effort: 5`; progress gain uses actor stats × assignment effort (`merging` default `1`) |
+| Config | Node numerics in `config/node-types/{enchant,testing,merge,sell,treasury,payroll}.json`; actors in `config/actors/*.json`; port layouts and seed wiring stay in code |
+| Starting stocks | Seed primes ports: `enchant` enchantment = genesis empty block; `treasury` money = `100`; sell/testing/merge empty; payroll timer = `period`; pending money moves empty; block map holds genesis; node progress `0` |
 
-Expected early behavior: first tick only enchant is effective among enchantment nodes (testing/sell empty); capacity may also split to treasury/payroll only when their prerequisites hold. Enchant mutations cost more as darkness rises. Sell deposits wait for treasury progress before the pile grows. Every `period` ticks the timer hits due; payday needs payroll progress, then treasury progress to debit (or mass-quit). Signal values are floating-point; the console rounds them for display.
+Expected early behavior: first tick only enchant is effective among enchantment nodes (testing/sell/merge empty); capacity may also split to treasury/payroll only when their prerequisites hold. Enchant mutations cost more as darkness rises. Sell deposits wait for treasury progress before the pile grows. Every `period` ticks the timer hits due; payday needs payroll progress, then treasury progress to debit (or mass-quit). Console shows aggregate unit counts and an abbreviated block hash.
 
 ## Related docs
 

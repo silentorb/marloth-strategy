@@ -48,7 +48,11 @@ public static class NodeTypeConfigLoader
             Path.Combine(directory, "payroll.json"),
             dto => new PayrollNodeConfig(dto.DefaultWage, dto.Period, dto.Effort));
 
-        return new NodeTypeConfigs(enchant, testing, sell, treasury, payroll);
+        var merge = ReadRequired<MergeNodeConfigDto, MergeNodeConfig>(
+            Path.Combine(directory, "merge.json"),
+            dto => new MergeNodeConfig(dto.Effort));
+
+        return new NodeTypeConfigs(enchant, testing, sell, treasury, payroll, merge);
     }
 
     private static TConfig ReadRequired<TDto, TConfig>(
@@ -125,6 +129,12 @@ public static class NodeTypeConfigLoader
         [JsonRequired]
         public int Period { get; init; }
 
+        [JsonRequired]
+        public double Effort { get; init; }
+    }
+
+    private sealed class MergeNodeConfigDto
+    {
         [JsonRequired]
         public double Effort { get; init; }
     }

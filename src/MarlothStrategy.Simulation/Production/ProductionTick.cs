@@ -48,6 +48,8 @@ public static class ProductionTick
             PendingMoneyMoves = pendingAfterCommit,
             Actors = computed.NextActors,
             Assignments = computed.NextAssignments,
+            EnchantmentBlocks = computed.EnchantmentBlocks,
+            NextUnitId = computed.NextUnitId,
             Tick = state.Tick + 1,
         };
 
@@ -183,6 +185,16 @@ public static class ProductionTick
             return resolvedInputs.TryGetValue(key, out var value) && value is SignalValue.Enchantment;
         }
 
+        if (node.Type == MagicAgencySeed.MergeTypeId)
+        {
+            var primaryKey = new PortKey(nodeId, MagicAgencySeed.PrimaryPortId);
+            var secondaryKey = new PortKey(nodeId, MagicAgencySeed.SecondaryPortId);
+            return resolvedInputs.TryGetValue(primaryKey, out var primary)
+                && primary is SignalValue.Enchantment
+                && resolvedInputs.TryGetValue(secondaryKey, out var secondary)
+                && secondary is SignalValue.Enchantment;
+        }
+
         if (node.Type == MagicAgencySeed.TreasuryTypeId)
         {
             return !state.PendingMoneyMoves.IsEmpty;
@@ -230,7 +242,26 @@ public static class ProductionTick
         ImmutableDictionary<NodeId, int> NextTimers,
         ImmutableArray<PendingMoneyMove> PendingMoves,
         ImmutableDictionary<ActorId, Actor> NextActors,
-        ImmutableArray<Assignment> NextAssignments);
+        ImmutableArray<Assignment> NextAssignments,
+        ImmutableDictionary<string, EnchantmentBlock> EnchantmentBlocks,
+        ulong NextUnitId);
+
+    private sealed class BlockScratch
+    {
+        public ImmutableDictionary<string, EnchantmentBlock>.Builder Blocks { get; }
+        public ulong NextUnitId { get; set; }
+
+        public BlockScratch(GameState state)
+        {
+            Blocks = state.EnchantmentBlocks.ToBuilder();
+            NextUnitId = state.NextUnitId;
+        }
+
+        public void Register(EnchantmentBlock block)
+        {
+            Blocks[block.Hash] = block;
+        }
+    }
 
     private static ComputeOutputsResult ComputeOutputs(
         GameState state,
@@ -248,6 +279,7 @@ public static class ProductionTick
         var nextActors = state.Actors;
         var nextAssignments = state.Assignments;
         var nextTimers = state.NodeTimers;
+        var scratch = new BlockScratch(state);
 
         foreach (var nodeId in OrderNodes(state.Graph.Nodes.Keys))
         {
@@ -266,7 +298,8 @@ public static class ProductionTick
                     progress,
                     resolvedInputs,
                     residuals,
-                    outputs);
+                    outputs,
+                    scratch);
                 rowByNode[nodeId] = applied.Row;
                 nextProgress[nodeId] = applied.Progress;
             }
@@ -281,7 +314,24 @@ public static class ProductionTick
                     progress,
                     resolvedInputs,
                     residuals,
-                    outputs);
+                    outputs,
+                    scratch);
+                rowByNode[nodeId] = applied.Row;
+                nextProgress[nodeId] = applied.Progress;
+            }
+            else if (node.Type == MagicAgencySeed.MergeTypeId)
+            {
+                var applied = ApplyMerge(
+                    state,
+                    nodeId,
+                    state.Catalog.Get(node.Type),
+                    state.NodeConfigs.Merge,
+                    effort,
+                    progress,
+                    resolvedInputs,
+                    residuals,
+                    outputs,
+                    scratch);
                 rowByNode[nodeId] = applied.Row;
                 nextProgress[nodeId] = applied.Progress;
             }
@@ -366,7 +416,9 @@ public static class ProductionTick
             nextTimers,
             pending,
             nextActors,
-            nextAssignments);
+            nextAssignments,
+            scratch.Blocks.ToImmutable(),
+            scratch.NextUnitId);
     }
 
     private readonly record struct AppliedDraft(NodeIoRow Row, double Progress);
@@ -380,7 +432,8 @@ public static class ProductionTick
         double progress,
         ImmutableDictionary<PortKey, SignalValue> resolvedInputs,
         ImmutableDictionary<PortKey, SignalValue>.Builder residuals,
-        ImmutableDictionary<PortKey, SignalValue>.Builder outputs)
+        ImmutableDictionary<PortKey, SignalValue>.Builder outputs,
+        BlockScratch scratch)
     {
         var enchantmentPort = MagicAgencySeed.EnchantmentPortId;
 
@@ -417,6 +470,8 @@ public static class ProductionTick
                 progress);
         }
 
+        scratch.Register(starting.Block);
+
         var nextProgress = progress + ProgressGain(
             state,
             nodeId,
@@ -424,19 +479,26 @@ public static class ProductionTick
             ActorStatKeys.Enchanting,
             ActorStatKeys.DefaultEnchanting);
 
-        var current = starting;
+        var currentBlock = starting.Block;
         while (true)
         {
-            var required = config.Effort + current.Darkness;
+            var required = config.Effort + currentBlock.DarknessCount;
             if (required <= 0 || nextProgress < required)
             {
                 break;
             }
 
             nextProgress -= required;
-            current = current.Mutate(config);
+            var (mutated, nextUnitId) = EnchantmentOps.Mutate(
+                currentBlock,
+                config,
+                scratch.NextUnitId);
+            scratch.NextUnitId = nextUnitId;
+            scratch.Register(mutated);
+            currentBlock = mutated;
         }
 
+        var current = new SignalValue.Enchantment(currentBlock);
         outputs[outputKey] = current;
 
         return new AppliedDraft(
@@ -463,7 +525,8 @@ public static class ProductionTick
         double progress,
         ImmutableDictionary<PortKey, SignalValue> resolvedInputs,
         ImmutableDictionary<PortKey, SignalValue>.Builder residuals,
-        ImmutableDictionary<PortKey, SignalValue>.Builder outputs)
+        ImmutableDictionary<PortKey, SignalValue>.Builder outputs,
+        BlockScratch scratch)
     {
         var enchantmentPort = MagicAgencySeed.EnchantmentPortId;
 
@@ -500,6 +563,8 @@ public static class ProductionTick
                 progress);
         }
 
+        scratch.Register(starting.Block);
+
         var nextProgress = progress + ProgressGain(
             state,
             nodeId,
@@ -508,14 +573,20 @@ public static class ProductionTick
             ActorStatKeys.DefaultTesting);
 
         var actorCount = CountEffectiveActorsOnNode(state, nodeId, resolvedInputs);
-        var reductionPerApplication = config.FallacyReduction * actorCount;
-        var current = starting;
+        var reductionPerApplication = EnchantmentOps.UnitCount(config.FallacyReduction) * actorCount;
+        var currentBlock = starting.Block;
         while (config.Effort > 0 && nextProgress >= config.Effort)
         {
             nextProgress -= config.Effort;
-            current = current.ReduceFallacy(reductionPerApplication);
+            var reduced = EnchantmentOps.ReduceFallacy(currentBlock, reductionPerApplication);
+            if (!ReferenceEquals(reduced, currentBlock) && reduced.Hash != currentBlock.Hash)
+            {
+                scratch.Register(reduced);
+                currentBlock = reduced;
+            }
         }
 
+        var current = new SignalValue.Enchantment(currentBlock);
         outputs[outputKey] = current;
 
         return new AppliedDraft(
@@ -530,6 +601,121 @@ public static class ProductionTick
                 enchantmentPort,
                 SignalTypes.Enchantment,
                 current),
+            nextProgress);
+    }
+
+    private static AppliedDraft ApplyMerge(
+        GameState state,
+        NodeId nodeId,
+        NodeType nodeType,
+        MergeNodeConfig config,
+        decimal assignmentEffort,
+        double progress,
+        ImmutableDictionary<PortKey, SignalValue> resolvedInputs,
+        ImmutableDictionary<PortKey, SignalValue>.Builder residuals,
+        ImmutableDictionary<PortKey, SignalValue>.Builder outputs,
+        BlockScratch scratch)
+    {
+        var primaryPort = MagicAgencySeed.PrimaryPortId;
+        var secondaryPort = MagicAgencySeed.SecondaryPortId;
+        var outputPort = MagicAgencySeed.EnchantmentPortId;
+
+        if (!nodeType.Inputs.ContainsKey(primaryPort) ||
+            !nodeType.Inputs.ContainsKey(secondaryPort) ||
+            !nodeType.Outputs.ContainsKey(outputPort))
+        {
+            throw new InvalidOperationException(
+                $"Node type '{nodeType.Id}' does not match merge port layout.");
+        }
+
+        resolvedInputs.TryGetValue(new PortKey(nodeId, primaryPort), out var primaryAvailable);
+        resolvedInputs.TryGetValue(new PortKey(nodeId, secondaryPort), out var secondaryAvailable);
+        var primaryKey = new PortKey(nodeId, primaryPort);
+        var secondaryKey = new PortKey(nodeId, secondaryPort);
+        var outputKey = new PortKey(nodeId, outputPort);
+
+        var hasBoth = primaryAvailable is SignalValue.Enchantment
+            && secondaryAvailable is SignalValue.Enchantment;
+
+        if (assignmentEffort <= 0m || !hasBoth)
+        {
+            if (primaryAvailable is not null)
+            {
+                residuals[primaryKey] = primaryAvailable;
+            }
+
+            if (secondaryAvailable is not null)
+            {
+                residuals[secondaryKey] = secondaryAvailable;
+            }
+
+            return new AppliedDraft(
+                new NodeIoRow(
+                    nodeId,
+                    assignmentEffort,
+                    primaryPort,
+                    SignalTypes.Enchantment,
+                    primaryAvailable,
+                    Consumed: false,
+                    primaryAvailable,
+                    outputPort,
+                    SignalTypes.Enchantment,
+                    Produced: null),
+                progress);
+        }
+
+        var primary = (SignalValue.Enchantment)primaryAvailable!;
+        var secondary = (SignalValue.Enchantment)secondaryAvailable!;
+        scratch.Register(primary.Block);
+        scratch.Register(secondary.Block);
+
+        var nextProgress = progress + ProgressGain(
+            state,
+            nodeId,
+            resolvedInputs,
+            ActorStatKeys.Merging,
+            ActorStatKeys.DefaultMerging);
+
+        if (config.Effort <= 0 || nextProgress < config.Effort)
+        {
+            residuals[primaryKey] = primary;
+            residuals[secondaryKey] = secondary;
+            return new AppliedDraft(
+                new NodeIoRow(
+                    nodeId,
+                    assignmentEffort,
+                    primaryPort,
+                    SignalTypes.Enchantment,
+                    primary,
+                    Consumed: false,
+                    primary,
+                    outputPort,
+                    SignalTypes.Enchantment,
+                    Produced: null),
+                nextProgress);
+        }
+
+        nextProgress -= config.Effort;
+        var resolved = EnchantmentOps.ResolveMerge(
+            primary.Block,
+            secondary.Block,
+            scratch.Blocks);
+        scratch.Register(resolved);
+        var produced = new SignalValue.Enchantment(resolved);
+        outputs[outputKey] = produced;
+
+        return new AppliedDraft(
+            new NodeIoRow(
+                nodeId,
+                assignmentEffort,
+                primaryPort,
+                SignalTypes.Enchantment,
+                primary,
+                Consumed: true,
+                Residual: null,
+                outputPort,
+                SignalTypes.Enchantment,
+                produced),
             nextProgress);
     }
 

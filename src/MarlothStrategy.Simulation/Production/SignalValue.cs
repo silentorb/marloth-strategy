@@ -4,7 +4,7 @@ namespace MarlothStrategy.Simulation.Production;
 
 /// <summary>
 /// Strongly typed signal payload: resources (additive) or information (copied/mutated).
-/// Numeric fields are floating-point (<see cref="double"/>).
+/// Money amounts remain floating-point; enchantment properties are discrete unit counts.
 /// </summary>
 public abstract record SignalValue(SignalTypeId TypeId)
 {
@@ -21,26 +21,19 @@ public abstract record SignalValue(SignalTypeId TypeId)
     }
 
     /// <summary>
-    /// Information: a single enchantment. Copied on route and mutated by nodes (not additively merged).
+    /// Information: a single enchantment block. Copied on route and mutated by nodes (not additively merged).
     /// </summary>
-    public sealed record Enchantment(double Volume, double Darkness, double Fallacy)
-        : SignalValue(SignalTypes.Enchantment)
+    public sealed record Enchantment(EnchantmentBlock Block) : SignalValue(SignalTypes.Enchantment)
     {
         public override SignalKind Kind => SignalKind.Information;
 
-        public Enchantment Mutate(EnchantNodeConfig config)
-        {
-            ArgumentNullException.ThrowIfNull(config);
-            return new(
-                Volume + config.VolumeDelta,
-                Darkness + config.DarknessDelta,
-                Fallacy + Darkness + config.FallacyConstant);
-        }
+        public int Volume => Block.VolumeCount;
 
-        public Enchantment ReduceFallacy(double amount)
-        {
-            return new(Volume, Darkness, Math.Max(0, Fallacy - amount));
-        }
+        public int Darkness => Block.DarknessCount;
+
+        public int Fallacy => Block.FallacyCount;
+
+        public string Hash => Block.Hash;
 
         public double SellPayout(SellNodeConfig config)
         {
@@ -52,7 +45,7 @@ public abstract record SignalValue(SignalTypeId TypeId)
     public SignalValue Copy() => this switch
     {
         Money m => new Money(m.Amount),
-        Enchantment e => new Enchantment(e.Volume, e.Darkness, e.Fallacy),
+        Enchantment e => new Enchantment(e.Block),
         _ => throw new InvalidOperationException($"Unknown signal value kind: {GetType().Name}."),
     };
 

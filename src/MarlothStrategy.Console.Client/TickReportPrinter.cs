@@ -66,7 +66,7 @@ public static class TickReportPrinter
         null => "0",
         SignalValue.Money m => FormatRounded(m.Amount),
         SignalValue.Enchantment e =>
-            $"{FormatRounded(e.Volume)}/{FormatRounded(e.Darkness)}/{FormatRounded(e.Fallacy)}",
+            $"{e.Block.AbbreviatedHash} {FormatRounded(e.Volume)}/{FormatRounded(e.Darkness)}/{FormatRounded(e.Fallacy)}",
         _ => throw new InvalidOperationException($"Unknown signal value kind: {value.GetType().Name}."),
     };
 
@@ -153,7 +153,8 @@ public static class TickReportPrinter
         || typeId == MagicAgencySeed.TestingTypeId
         || typeId == MagicAgencySeed.SellTypeId
         || typeId == MagicAgencySeed.TreasuryTypeId
-        || typeId == MagicAgencySeed.PayrollTypeId;
+        || typeId == MagicAgencySeed.PayrollTypeId
+        || typeId == MagicAgencySeed.MergeTypeId;
 
     private static bool ShowsTimer(NodeTypeId typeId) =>
         typeId == MagicAgencySeed.PayrollTypeId;
@@ -197,6 +198,7 @@ public static class TickReportPrinter
         if (currentInfo is null && priorInfo is not null)
         {
             lines.Add($"  {port.Id.Value}:");
+            AppendEnchantmentLeaf(lines, "hash", priorInfo.Block.AbbreviatedHash, "0");
             AppendEnchantmentLeaf(lines, "volume", FormatRounded(priorInfo.Volume), "0");
             AppendEnchantmentLeaf(lines, "darkness", FormatRounded(priorInfo.Darkness), "0");
             AppendEnchantmentLeaf(lines, "fallacy", FormatRounded(priorInfo.Fallacy), "0");
@@ -207,16 +209,19 @@ public static class TickReportPrinter
         lines.Add($"  {port.Id.Value}:");
         if (previous is null)
         {
-            lines.Add($"    volume: {FormatRounded(currentInfo!.Volume)}");
+            lines.Add($"    hash: {currentInfo!.Block.AbbreviatedHash}");
+            lines.Add($"    volume: {FormatRounded(currentInfo.Volume)}");
             lines.Add($"    darkness: {FormatRounded(currentInfo.Darkness)}");
             lines.Add($"    fallacy: {FormatRounded(currentInfo.Fallacy)}");
             return;
         }
 
+        var priorHash = priorInfo is null ? "0" : priorInfo.Block.AbbreviatedHash;
         var priorVolume = priorInfo is null ? "0" : FormatRounded(priorInfo.Volume);
         var priorDarkness = priorInfo is null ? "0" : FormatRounded(priorInfo.Darkness);
         var priorFallacy = priorInfo is null ? "0" : FormatRounded(priorInfo.Fallacy);
-        AppendEnchantmentLeaf(lines, "volume", priorVolume, FormatRounded(currentInfo!.Volume));
+        AppendEnchantmentLeaf(lines, "hash", priorHash, currentInfo!.Block.AbbreviatedHash);
+        AppendEnchantmentLeaf(lines, "volume", priorVolume, FormatRounded(currentInfo.Volume));
         AppendEnchantmentLeaf(lines, "darkness", priorDarkness, FormatRounded(currentInfo.Darkness));
         AppendEnchantmentLeaf(lines, "fallacy", priorFallacy, FormatRounded(currentInfo.Fallacy));
     }

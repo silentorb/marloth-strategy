@@ -16,7 +16,8 @@ public sealed class TickReportPrinterTests
         new TestingNodeConfig(Effort: 10, FallacyReduction: 5),
         new SellNodeConfig(Effort: 10, PayoutFloor: 0),
         new TreasuryNodeConfig(Effort: 2),
-        new PayrollNodeConfig(DefaultWage: 10, Period: 5, Effort: 5));
+        new PayrollNodeConfig(DefaultWage: 10, Period: 5, Effort: 5),
+        new MergeNodeConfig(Effort: 5));
 
     private static readonly ImmutableDictionary<ActorId, Actor> DefaultActors =
         ImmutableDictionary<ActorId, Actor>.Empty.Add(
@@ -34,6 +35,7 @@ public sealed class TickReportPrinterTests
         var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors);
         var text = TickReportPrinter.FormatScreen(state, width: PanelLayout.DefaultWidth);
         var normalized = text.Replace("\r\n", "\n");
+        var genesis = EnchantmentBlock.CreateGenesis();
 
         Assert.StartsWith($"{BoxDrawing.DoubleTopLeft}", normalized);
         Assert.Contains("Marloth Strategy", text);
@@ -41,11 +43,15 @@ public sealed class TickReportPrinterTests
         Assert.Contains("actors: intern", text);
         Assert.Contains("enchant:", text);
         Assert.Contains("  enchantment:", text);
+        Assert.Contains($"    hash: {genesis.AbbreviatedHash}", text);
         Assert.Contains("    volume: 0", text);
         Assert.Contains("    darkness: 0", text);
         Assert.Contains("    fallacy: 0", text);
         Assert.Contains("  progress: 0", text);
         Assert.Contains("testing:", text);
+        Assert.Contains("merge:", text);
+        Assert.Contains("  primary: 0", text);
+        Assert.Contains("  secondary: 0", text);
         Assert.Contains("payroll:", text);
         Assert.Contains("  timer: 5", text);
         Assert.Contains("  money: 0", text);
@@ -56,10 +62,10 @@ public sealed class TickReportPrinterTests
         Assert.Contains("  money: 100", text);
         Assert.Contains($"{BoxDrawing.MixedTeeLeft}", text);
         Assert.Contains($"{BoxDrawing.DoubleBottomLeft}", text);
-        Assert.DoesNotContain('\u2192', text);
         Assert.DoesNotContain("enchantment: -", text);
         Assert.DoesNotContain("Effort", text);
         Assert.DoesNotContain("Consumed", text);
+        Assert.DoesNotContain("volume: 0 \u2192", text);
     }
 
     [Fact]
@@ -80,12 +86,14 @@ public sealed class TickReportPrinterTests
         Assert.DoesNotContain("money: 0 \u2192 80", text);
         Assert.DoesNotContain("Effort", text);
         Assert.DoesNotContain("Consumed", text);
+        Assert.Contains("hash:", normalized);
     }
 
     [Fact]
     public void FormatScreen_WithPrevious_AnnotatesChangedLeaves()
     {
         var previous = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors);
+        var (block, _) = EnchantmentOps.FromCounts(10, 1, 1, nextUnitId: 1);
         var current = previous with
         {
             Tick = 1,
@@ -95,7 +103,8 @@ public sealed class TickReportPrinterTests
                     new SignalValue.Money(80))
                 .SetItem(
                     new PortKey(MagicAgencySeed.EnchantNodeId, MagicAgencySeed.EnchantmentPortId),
-                    new SignalValue.Enchantment(10, 1, 1)),
+                    new SignalValue.Enchantment(block)),
+            EnchantmentBlocks = previous.EnchantmentBlocks.SetItem(block.Hash, block),
             NodeProgress = ImmutableDictionary<NodeId, double>.Empty
                 .Add(MagicAgencySeed.SellNodeId, 5)
                 .Add(MagicAgencySeed.TreasuryNodeId, 1)
@@ -117,15 +126,17 @@ public sealed class TickReportPrinterTests
         Assert.Contains("progress: 0 \u2192 5", text);
         Assert.Contains("timer: 5 \u2192 4", normalized);
         Assert.Contains("progress: 0 \u2192 2", normalized);
+        Assert.Contains($"hash: {EnchantmentBlock.CreateGenesis().AbbreviatedHash} \u2192 {block.AbbreviatedHash}", text);
     }
 
     [Fact]
-    public void FormatSignal_RoundsNonIntegerNumerics()
+    public void FormatSignal_IncludesAbbreviatedHashAndCounts()
     {
         Assert.Equal("11", TickReportPrinter.FormatSignal(new SignalValue.Money(10.6)));
+        var (block, _) = EnchantmentOps.FromCounts(11, 2, 4, nextUnitId: 1);
         Assert.Equal(
-            "11/2/4",
-            TickReportPrinter.FormatSignal(new SignalValue.Enchantment(10.5, 1.6, 3.5)));
+            $"{block.AbbreviatedHash} 11/2/4",
+            TickReportPrinter.FormatSignal(new SignalValue.Enchantment(block)));
     }
 
     [Fact]
