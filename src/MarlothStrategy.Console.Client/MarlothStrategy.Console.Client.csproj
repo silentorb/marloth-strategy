@@ -9,4 +9,9 @@
     <ProjectReference Include="..\MarlothStrategy.Simulation\MarlothStrategy.Simulation.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Msagl" Version="1.1.6" />
+    <PackageReference Include="Microsoft.Msagl.Drawing" Version="1.1.6" />
+  </ItemGroup>
+
 </Project>

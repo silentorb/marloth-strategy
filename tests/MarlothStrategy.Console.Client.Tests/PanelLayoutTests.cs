@@ -3,6 +3,16 @@ namespace MarlothStrategy.Console.Client.Tests;
 public sealed class PanelLayoutTests
 {
     [Fact]
+    public void LeftInteriorWidthForTotal_DefaultWidth_IsOneThirdInterior()
+    {
+        Assert.Equal(100, PanelLayout.DefaultWidth);
+        var left = PanelLayout.LeftInteriorWidthForTotal(PanelLayout.DefaultWidth);
+        Assert.Equal((PanelLayout.DefaultWidth - 3) / 3, left);
+        var right = PanelLayout.DefaultWidth - left - 3;
+        Assert.True(right >= left * 2 - 1, $"Expected ~1:2 split, got left={left} right={right}");
+    }
+
+    [Fact]
     public void Compose_UsesDoubleOuterAndMixedSubpanelDividers()
     {
         var text = PanelLayout.Compose(

@@ -41,15 +41,10 @@ public static class TickReportPrinter
             leftSubpanels.Add(FormatNodeLines(state, previous, nodeId));
         }
 
-        var rightLines = FlowGraphPrinter.FormatLines(state);
-
-        // Prefer a wider left column for state text; remaining width for the graph.
-        var leftInteriorWidth = Math.Max(24, (width * 5) / 10 - 2);
-        var maxLeft = width - 5;
-        if (leftInteriorWidth > maxLeft)
-        {
-            leftInteriorWidth = maxLeft;
-        }
+        // Left:right interior = 1:2 so the flow graph has more horizontal room.
+        var leftInteriorWidth = PanelLayout.LeftInteriorWidthForTotal(width);
+        var rightInteriorWidth = width - leftInteriorWidth - 3;
+        var rightLines = FlowGraphPrinter.FormatLines(state, rightInteriorWidth);
 
         return PanelLayout.Compose(header, leftSubpanels, rightLines, width, leftInteriorWidth);
     }
