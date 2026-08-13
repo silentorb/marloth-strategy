@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using MarlothStrategy.Console.Client;
+using MarlothStrategy.Simulation.Graph;
 using MarlothStrategy.Simulation.Production;
 
 namespace MarlothStrategy.Console.Client.Tests;
@@ -16,61 +17,56 @@ public sealed class TickReportPrinterTests
         new SellNodeConfig(Cost: 20, Effort: 10, PayoutFloor: 0));
 
     [Fact]
-    public void FormatStartingStocks_IncludesTickAndPortSignals()
+    public void FormatStateSnapshot_Tick0_UsesHeadingBlankLinesAndYamlShape()
     {
         var state = MagicAgencySeed.CreateInitialState(DefaultConfigs);
-        var text = TickReportPrinter.FormatStartingStocks(state);
+        var text = TickReportPrinter.FormatStateSnapshot(state);
 
-        Assert.Contains("Starting stocks (tick 0)", text);
-        Assert.Contains("enchant.enchantment: 0/0/0", text);
-        Assert.Contains("enchant.money: 100", text);
+        Assert.StartsWith("## Tick 0\n\nenchant:", text.Replace("\r\n", "\n"));
+        Assert.Contains("enchant:", text);
+        Assert.Contains("  money: 100", text);
+        Assert.Contains("  enchantment:", text);
+        Assert.Contains("    volume: 0", text);
+        Assert.Contains("    darkness: 0", text);
+        Assert.Contains("    fallacy: 0", text);
+        Assert.Contains("  progress: 0", text);
+        Assert.Contains("\n\nsell:\n", text.Replace("\r\n", "\n"));
+        Assert.Contains("  enchantment: -", text);
+        Assert.Contains("  money: 0", text);
+        Assert.DoesNotContain('\u2192', text);
+        Assert.DoesNotContain("Effort", text);
+        Assert.DoesNotContain("Consumed", text);
     }
 
     [Fact]
-    public void FormatTickReport_IncludesHeaderAndNodeIoCells()
+    public void FormatStateSnapshot_WithPrevious_AnnotatesChangedLeaves()
     {
-        var result = new ProductionTickResult(
-            MagicAgencySeed.CreateInitialState(DefaultConfigs) with { Tick = 1 },
-            ImmutableArray.Create(
-                new NodeIoRow(
-                    MagicAgencySeed.EnchantNodeId,
-                    0.5m,
-                    MagicAgencySeed.EnchantmentPortId,
-                    SignalTypes.Enchantment,
-                    new SignalValue.Enchantment(0, 0, 0),
-                    Consumed: true,
-                    Residual: null,
-                    MagicAgencySeed.EnchantmentPortId,
-                    SignalTypes.Enchantment,
+        var previous = MagicAgencySeed.CreateInitialState(DefaultConfigs);
+        var current = previous with
+        {
+            Tick = 1,
+            PortSignals = previous.PortSignals
+                .SetItem(
+                    new PortKey(MagicAgencySeed.EnchantNodeId, MagicAgencySeed.MoneyPortId),
+                    new SignalValue.Money(80))
+                .SetItem(
+                    new PortKey(MagicAgencySeed.EnchantNodeId, MagicAgencySeed.EnchantmentPortId),
                     new SignalValue.Enchantment(10, 1, 1)),
-                new NodeIoRow(
-                    MagicAgencySeed.SellNodeId,
-                    0.5m,
-                    MagicAgencySeed.EnchantmentPortId,
-                    SignalTypes.Enchantment,
-                    Available: null,
-                    Consumed: false,
-                    Residual: null,
-                    MagicAgencySeed.MoneyPortId,
-                    SignalTypes.Money,
-                    Produced: null)));
+            NodeProgress = ImmutableDictionary<NodeId, double>.Empty
+                .Add(MagicAgencySeed.SellNodeId, 5),
+        };
 
-        var text = TickReportPrinter.FormatTickReport(result);
+        var text = TickReportPrinter.FormatStateSnapshot(current, previous);
+        var normalized = text.Replace("\r\n", "\n");
 
-        Assert.Contains("Tick 1", text);
-        Assert.Contains("Node", text);
-        Assert.Contains("Effort", text);
-        Assert.Contains("Input", text);
-        Assert.Contains("Consumed", text);
-        Assert.Contains("Residual", text);
-        Assert.Contains("Output", text);
-        Assert.Contains("enchant", text);
-        Assert.Contains("sell", text);
-        Assert.Contains("enchantment 0/0/0", text);
-        Assert.Contains("enchantment 10/1/1", text);
-        Assert.Contains("0.5", text);
-        Assert.Contains("yes", text);
-        Assert.Contains("no", text);
+        Assert.StartsWith("## Tick 1\n\n", normalized);
+        Assert.Contains("  money: 100 \u2192 80", text);
+        Assert.Contains("    volume: 0 \u2192 10", text);
+        Assert.Contains("    darkness: 0 \u2192 1", text);
+        Assert.Contains("    fallacy: 0 \u2192 1", text);
+        Assert.Contains("  progress: 0 \u2192 5", text);
+        // Unchanged sell money stays bare zero
+        Assert.Contains("sell:\n  enchantment: -\n  money: 0\n", normalized);
     }
 
     [Fact]

@@ -2,11 +2,11 @@
 
 ## Summary
 
-`MarlothStrategy.Console.Client` owns the ASCII session: seed boot, prompt loop, and formatting of tick reports. `MarlothStrategy.Console.App` is a thin host. Simulation stays free of console I/O and exposes authoritative tick results via `AdvanceTickWithReport`.
+`MarlothStrategy.Console.Client` owns the ASCII session: seed boot, prompt loop, and formatting of tick state snapshots. `MarlothStrategy.Console.App` is a thin host. Simulation stays free of console I/O and exposes authoritative tick results via `AdvanceTickWithReport`.
 
 ## When to read this
 
-- Changing console prompts, session loop, stock snapshot, or I/O table formatting
+- Changing console prompts, session loop, or YAML-like state snapshot formatting
 - Wiring Client to Simulation tick/report APIs
 - Adding IDE play launch configuration for the console App
 
@@ -14,25 +14,39 @@
 
 - App constructs `GameConfig` and calls `ConsoleClient.Run(config)`.
 - Prefer a **single abort boundary** at process entry for fatal/unrecoverable errors ([error handling](../platform/error-handling.md)); do not scatter catches in Client.
-- Client seeds with `MagicAgencySeed.CreateInitialState()`, prints a starting stocks snapshot, then loops until quit/EOF ([console loop](../../../game/features/session/console-loop.md)).
-- On Enter: `var result = ProductionTick.AdvanceTickWithReport(state); state = result.State;` then print the I/O table for `result.Nodes`.
+- Client seeds with `MagicAgencySeed.CreateInitialState()`, prints a tick-0 state snapshot, then loops until quit/EOF ([console loop](../../../game/features/session/console-loop.md)).
+- On Enter: capture prior state, `var result = ProductionTick.AdvanceTickWithReport(state); state = result.State;` then print `FormatStateSnapshot(state, previous)`.
 - Interactive input uses `Console.ReadKey(intercept: true)` so **Enter** and **`q`/`Q`** are single keypresses. When `Console.IsInputRedirected`, fall back to `ReadLine` (empty line / `q`) for agent piped smoke.
 - Invalid prompt input reprints a short hint and re-prompts. Expected player mistakes are not exceptions.
 
-## I/O table columns
+## State snapshot format
 
-After each advanced tick, print a header `Tick N` and a fixed-width table:
+After each advanced tick (and once at tick 0), print a Markdown-style heading and a YAML-like tree:
 
-| Column | Source |
-|--------|--------|
-| Node | `NodeIoRow.NodeId` |
-| Effort | `NodeIoRow.Effort` |
-| Input | input signal type + available payload (`money` amount, or enchantment `vol/dark/fall`, or `-` if empty); numerics **rounded** to nearest integer for display |
-| Consumed | `yes` / `no` (`NodeIoRow.Consumed`) |
-| Residual | residual payload or `-` (same rounding) |
-| Output | output signal type + produced payload (or `-`; same rounding) |
+```text
+## Tick N
 
-Node row order matches Simulation’s tick iteration order.
+node-id:
+  port: …
+  progress: …
+
+other-node:
+  …
+```
+
+Rules:
+
+| Rule | Detail |
+|------|--------|
+| Heading | `## Tick {N}` then a blank line |
+| Nodes | One block per graph node, ordered by node id; blank line between node blocks |
+| Ports | Union of the node type’s input and output ports (ordinal by port id), then `progress` |
+| Money (resource) | Scalar amount; missing stock displays as `0` (never `-`); numerics **rounded** to nearest integer |
+| Enchantment (information) | Nested `volume` / `darkness` / `fallacy` when present; absent displays as `-`; same rounding |
+| Progress | Rounded numeric from `NodeProgress` (default `0`) |
+| Change annotations | When a previous state is supplied, compare rounded display strings per leaf; if different, print `previous → current` (U+2192); if equal, print current only. Tick 0 has no previous state (no arrows). |
+
+`AdvanceTickWithReport` still returns per-node I/O rows for Simulation consumers; the console Client does not print that table.
 
 ## IDE play launch
 

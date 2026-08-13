@@ -13,7 +13,7 @@ public static class ConsoleClient
         System.Console.WriteLine();
 
         var state = MagicAgencySeed.CreateInitialState();
-        System.Console.WriteLine(TickReportPrinter.FormatStartingStocks(state));
+        System.Console.WriteLine(TickReportPrinter.FormatStateSnapshot(state));
         System.Console.WriteLine();
 
         while (true)
@@ -31,9 +31,10 @@ public static class ConsoleClient
                     continue;
                 case PromptAction.Advance:
                     System.Console.WriteLine();
+                    var previous = state;
                     var result = ProductionTick.AdvanceTickWithReport(state);
                     state = result.State;
-                    System.Console.WriteLine(TickReportPrinter.FormatTickReport(result));
+                    System.Console.WriteLine(TickReportPrinter.FormatStateSnapshot(state, previous));
                     System.Console.WriteLine();
                     break;
             }
