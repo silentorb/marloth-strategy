@@ -78,11 +78,13 @@ public static class MagicAgencySeed
             TreasuryTypeId,
             ImmutableDictionary<PortId, Port>.Empty
                 .Add(MoneyPortId, new Port(MoneyPortId, moneyType)),
-            ImmutableDictionary<PortId, Port>.Empty);
+            ImmutableDictionary<PortId, Port>.Empty
+                .Add(MoneyPortId, new Port(MoneyPortId, moneyType)));
 
         var payrollType = new NodeType(
             PayrollTypeId,
-            ImmutableDictionary<PortId, Port>.Empty,
+            ImmutableDictionary<PortId, Port>.Empty
+                .Add(MoneyPortId, new Port(MoneyPortId, moneyType)),
             ImmutableDictionary<PortId, Port>.Empty);
 
         var catalog = new NodeTypeCatalog(
@@ -120,7 +122,12 @@ public static class MagicAgencySeed
                     new EdgeId("money-to-treasury"),
                     new Edge(
                         new PortReference(SellNodeId, MoneyPortId),
-                        new PortReference(TreasuryNodeId, MoneyPortId))));
+                        new PortReference(TreasuryNodeId, MoneyPortId)))
+                .Add(
+                    new EdgeId("treasury-to-payroll"),
+                    new Edge(
+                        new PortReference(TreasuryNodeId, MoneyPortId),
+                        new PortReference(PayrollNodeId, MoneyPortId))));
 
         var assignments = ImmutableArray.Create(
             new Assignment(ActorId, EnchantNodeId),

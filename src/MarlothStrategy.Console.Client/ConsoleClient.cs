@@ -9,12 +9,8 @@ public static class ConsoleClient
     {
         ArgumentNullException.ThrowIfNull(config);
 
-        System.Console.WriteLine("Marloth Strategy — console prototype");
-        System.Console.WriteLine();
-
         var state = MagicAgencySeed.CreateInitialState();
-        System.Console.WriteLine(TickReportPrinter.FormatStateSnapshot(state));
-        System.Console.WriteLine();
+        DrawReport(state);
 
         while (true)
         {
@@ -26,19 +22,58 @@ public static class ConsoleClient
                     System.Console.WriteLine("Exiting.");
                     return;
                 case PromptAction.Unknown:
-                    System.Console.WriteLine();
+                    DrawReport(state);
                     System.Console.WriteLine("Unknown input. Press Enter for next tick, or q to quit.");
                     continue;
                 case PromptAction.Advance:
-                    System.Console.WriteLine();
                     var previous = state;
                     var result = ProductionTick.AdvanceTickWithReport(state);
                     state = result.State;
-                    System.Console.WriteLine(TickReportPrinter.FormatStateSnapshot(state, previous, result));
-                    System.Console.WriteLine();
+                    DrawReport(state, previous, result);
                     break;
             }
         }
+    }
+
+    private static void DrawReport(
+        GameState state,
+        GameState? previous = null,
+        ProductionTickResult? tick = null)
+    {
+        TryClear();
+        var width = ResolveWidth();
+        System.Console.WriteLine(TickReportPrinter.FormatScreen(state, previous, tick, width));
+        System.Console.WriteLine();
+    }
+
+    private static void TryClear()
+    {
+        try
+        {
+            System.Console.Clear();
+        }
+        catch (IOException)
+        {
+            // Some redirected / non-TTY hosts reject Clear; continue with a fresh write.
+        }
+    }
+
+    private static int ResolveWidth()
+    {
+        try
+        {
+            var windowWidth = System.Console.WindowWidth;
+            if (windowWidth >= 40)
+            {
+                return Math.Min(windowWidth, PanelLayout.DefaultWidth);
+            }
+        }
+        catch (IOException)
+        {
+            // WindowWidth unavailable when redirected.
+        }
+
+        return PanelLayout.DefaultWidth;
     }
 
     private enum PromptAction

@@ -310,6 +310,7 @@ public static class ProductionTick
                     progress,
                     resolvedInputs,
                     residuals,
+                    outputs,
                     remainingStartPending,
                     nextActors,
                     nextAssignments);
@@ -628,6 +629,7 @@ public static class ProductionTick
         double progress,
         ImmutableDictionary<PortKey, SignalValue> resolvedInputs,
         ImmutableDictionary<PortKey, SignalValue>.Builder residuals,
+        ImmutableDictionary<PortKey, SignalValue>.Builder outputs,
         ImmutableArray<PendingMoneyMove> pending,
         ImmutableDictionary<ActorId, Actor> actors,
         ImmutableArray<Assignment> assignments)
@@ -645,6 +647,7 @@ public static class ProductionTick
         var nextProgress = progress;
         var nextActors = actors;
         var nextAssignments = assignments;
+        var emittedOut = 0.0;
 
         if (assignmentEffort > 0m && !startQueue.IsEmpty)
         {
@@ -671,6 +674,7 @@ public static class ProductionTick
                     if (pileAmount >= move.Amount)
                     {
                         pileAmount -= move.Amount;
+                        emittedOut += move.Amount;
                     }
                     else
                     {
@@ -688,6 +692,11 @@ public static class ProductionTick
         }
 
         residuals[moneyKey] = new SignalValue.Money(pileAmount);
+        if (emittedOut > 0)
+        {
+            outputs[moneyKey] = new SignalValue.Money(emittedOut);
+        }
+
         return new TreasuryApplied(nextProgress, nextPending, nextActors, nextAssignments);
     }
 
@@ -706,6 +715,7 @@ public static class ProductionTick
         ImmutableArray<PendingMoneyMove> appendedPending,
         ImmutableDictionary<NodeId, int> timers)
     {
+        // Money on the payroll input is disbursed: never written to residuals.
         var remaining = state.NodeTimers.GetValueOrDefault(nodeId, config.Period);
         var nextProgress = progress;
         var nextPending = appendedPending;
@@ -732,6 +742,13 @@ public static class ProductionTick
 
                 if (wageTotal > 0)
                 {
+                    if (!HasTreasuryFundingEdge(state, nodeId))
+                    {
+                        throw new InvalidOperationException(
+                            $"Payroll node '{nodeId.Value}' has wage total {wageTotal} but no funding edge " +
+                            $"from a treasury money port to its money input.");
+                    }
+
                     nextPending = nextPending.Add(new PendingMoneyMove(MoneyMoveDirection.Out, wageTotal));
                 }
 
@@ -740,6 +757,33 @@ public static class ProductionTick
         }
 
         return new PayrollApplied(nextProgress, nextPending, nextTimers);
+    }
+
+    /// <summary>
+    /// True when at least one edge routes from a treasury money port onto this payroll money input.
+    /// </summary>
+    private static bool HasTreasuryFundingEdge(GameState state, NodeId payrollNodeId)
+    {
+        foreach (var edge in state.Graph.Edges.Values)
+        {
+            if (edge.To.Node != payrollNodeId || edge.To.Port != MagicAgencySeed.MoneyPortId)
+            {
+                continue;
+            }
+
+            if (!state.Graph.Nodes.TryGetValue(edge.From.Node, out var fromNode))
+            {
+                continue;
+            }
+
+            if (fromNode.Type == MagicAgencySeed.TreasuryTypeId
+                && edge.From.Port == MagicAgencySeed.MoneyPortId)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static (

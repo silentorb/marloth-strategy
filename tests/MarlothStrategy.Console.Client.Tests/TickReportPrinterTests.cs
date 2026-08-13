@@ -29,25 +29,33 @@ public sealed class TickReportPrinterTests
                     .Add(ActorStatKeys.Sales, 10)));
 
     [Fact]
-    public void FormatStateSnapshot_Tick0_UsesHeadingBlankLinesAndYamlShape()
+    public void FormatScreen_Tick0_UsesPanelFrameAndNodeContent()
     {
         var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors);
-        var text = TickReportPrinter.FormatStateSnapshot(state);
+        var text = TickReportPrinter.FormatScreen(state, width: PanelLayout.DefaultWidth);
         var normalized = text.Replace("\r\n", "\n");
 
-        Assert.StartsWith("## Tick 0\n\nactors: intern\n\nenchant:", normalized);
+        Assert.StartsWith($"{BoxDrawing.DoubleTopLeft}", normalized);
+        Assert.Contains("Marloth Strategy", text);
+        Assert.Contains("Tick 0", text);
+        Assert.Contains("actors: intern", text);
         Assert.Contains("enchant:", text);
         Assert.Contains("  enchantment:", text);
         Assert.Contains("    volume: 0", text);
         Assert.Contains("    darkness: 0", text);
         Assert.Contains("    fallacy: 0", text);
         Assert.Contains("  progress: 0", text);
-        Assert.Contains("\ntesting:\n", normalized);
-        Assert.Contains("\n\npayroll:\n  timer: 5\n  progress: 0", normalized);
-        Assert.Contains("\n\nsell:\n", normalized);
+        Assert.Contains("testing:", text);
+        Assert.Contains("payroll:", text);
+        Assert.Contains("  timer: 5", text);
+        Assert.Contains("  money: 0", text);
+        Assert.Contains("sell:", text);
         Assert.Contains("  enchantment: 0", text);
         Assert.Contains("  money: 0", text);
-        Assert.Contains("\n\ntreasury:\n  money: 100\n  progress: 0", normalized);
+        Assert.Contains("treasury:", text);
+        Assert.Contains("  money: 100", text);
+        Assert.Contains($"{BoxDrawing.MixedTeeLeft}", text);
+        Assert.Contains($"{BoxDrawing.DoubleBottomLeft}", text);
         Assert.DoesNotContain('\u2192', text);
         Assert.DoesNotContain("enchantment: -", text);
         Assert.DoesNotContain("Effort", text);
@@ -55,26 +63,27 @@ public sealed class TickReportPrinterTests
     }
 
     [Fact]
-    public void FormatStateSnapshot_Tick1_MoneyShowsOwnedStockNotTransforms()
+    public void FormatScreen_Tick1_MoneyShowsOwnedStockNotTransforms()
     {
         var previous = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors);
         var result = ProductionTick.AdvanceTickWithReport(previous);
-        var text = TickReportPrinter.FormatStateSnapshot(result.State, previous, result);
+        var text = TickReportPrinter.FormatScreen(result.State, previous, result, PanelLayout.DefaultWidth);
         var normalized = text.Replace("\r\n", "\n");
 
-        Assert.StartsWith("## Tick 1\n\nactors: intern\n\n", normalized);
-        Assert.Contains("enchant:\n  enchantment:\n    volume: 0 \u2192 10", normalized);
-        Assert.Contains("payroll:\n  timer: 5 \u2192 4\n", normalized);
-        Assert.Contains("testing:\n  enchantment:\n    volume: 0 \u2192 10", normalized);
-        Assert.Contains("sell:\n  enchantment: 0\n", normalized);
-        Assert.Contains("  money: 0\n", normalized);
-        Assert.Contains("treasury:\n  money: 100", normalized);
+        Assert.Contains("Tick 1", normalized);
+        Assert.Contains("actors: intern", normalized);
+        Assert.Contains("volume: 0 \u2192 10", normalized);
+        Assert.Contains("timer: 5 \u2192 4", normalized);
+        Assert.Contains("treasury:", normalized);
+        Assert.Contains("  money: 100", normalized);
         Assert.DoesNotContain("money: 100 \u2192 80", text);
         Assert.DoesNotContain("money: 0 \u2192 80", text);
+        Assert.DoesNotContain("Effort", text);
+        Assert.DoesNotContain("Consumed", text);
     }
 
     [Fact]
-    public void FormatStateSnapshot_WithPrevious_AnnotatesChangedLeaves()
+    public void FormatScreen_WithPrevious_AnnotatesChangedLeaves()
     {
         var previous = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors);
         var current = previous with
@@ -96,17 +105,18 @@ public sealed class TickReportPrinterTests
             Assignments = ImmutableArray<Assignment>.Empty,
         };
 
-        var text = TickReportPrinter.FormatStateSnapshot(current, previous);
+        var text = TickReportPrinter.FormatScreen(current, previous, width: PanelLayout.DefaultWidth);
         var normalized = text.Replace("\r\n", "\n");
 
-        Assert.StartsWith("## Tick 1\n\nactors: intern \u2192 0\n\n", normalized);
-        Assert.Contains("treasury:\n  money: 100 \u2192 80\n  progress: 0 \u2192 1", normalized);
-        Assert.Contains("    volume: 0 \u2192 10", text);
-        Assert.Contains("    darkness: 0 \u2192 1", text);
-        Assert.Contains("    fallacy: 0 \u2192 1", text);
-        Assert.Contains("  progress: 0 \u2192 5", text);
-        Assert.Contains("payroll:\n  timer: 5 \u2192 4\n  progress: 0 \u2192 2", normalized);
-        Assert.Contains("sell:\n  enchantment: 0\n  money: 0\n", normalized);
+        Assert.Contains("actors: intern \u2192 0", normalized);
+        Assert.Contains("money: 100 \u2192 80", normalized);
+        Assert.Contains("progress: 0 \u2192 1", normalized);
+        Assert.Contains("volume: 0 \u2192 10", text);
+        Assert.Contains("darkness: 0 \u2192 1", text);
+        Assert.Contains("fallacy: 0 \u2192 1", text);
+        Assert.Contains("progress: 0 \u2192 5", text);
+        Assert.Contains("timer: 5 \u2192 4", normalized);
+        Assert.Contains("progress: 0 \u2192 2", normalized);
     }
 
     [Fact]
@@ -116,5 +126,14 @@ public sealed class TickReportPrinterTests
         Assert.Equal(
             "11/2/4",
             TickReportPrinter.FormatSignal(new SignalValue.Enchantment(10.5, 1.6, 3.5)));
+    }
+
+    [Fact]
+    public void FormatStateSnapshot_DelegatesToFormatScreen()
+    {
+        var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors);
+        Assert.Equal(
+            TickReportPrinter.FormatScreen(state, width: PanelLayout.DefaultWidth),
+            TickReportPrinter.FormatStateSnapshot(state));
     }
 }

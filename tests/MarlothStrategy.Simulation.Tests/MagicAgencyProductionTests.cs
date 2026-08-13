@@ -40,7 +40,7 @@ public sealed class MagicAgencyProductionTests
         Assert.True(state.Graph.Nodes.ContainsKey(MagicAgencySeed.TestingNodeId));
         Assert.Empty(state.PendingMoneyMoves);
 
-        Assert.Equal(4, state.Graph.Edges.Count);
+        Assert.Equal(5, state.Graph.Edges.Count);
         Assert.Contains(
             state.Graph.Edges.Values,
             e => e.From.Node == MagicAgencySeed.EnchantNodeId
@@ -49,6 +49,12 @@ public sealed class MagicAgencyProductionTests
             state.Graph.Edges.Values,
             e => e.From.Node == MagicAgencySeed.TestingNodeId
                  && e.To.Node == MagicAgencySeed.SellNodeId);
+        Assert.Contains(
+            state.Graph.Edges.Values,
+            e => e.From.Node == MagicAgencySeed.TreasuryNodeId
+                 && e.From.Port == MagicAgencySeed.MoneyPortId
+                 && e.To.Node == MagicAgencySeed.PayrollNodeId
+                 && e.To.Port == MagicAgencySeed.MoneyPortId);
         Assert.DoesNotContain(
             state.Graph.Edges.Values,
             e => e.From.Node == MagicAgencySeed.EnchantNodeId
@@ -316,7 +322,16 @@ public sealed class MagicAgencyProductionTests
         Assert.Equal(
             new SignalValue.Money(90),
             Signal(afterDebit, MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId));
+        Assert.Equal(
+            new SignalValue.Money(10),
+            Signal(afterDebit, MagicAgencySeed.PayrollNodeId, MagicAgencySeed.MoneyPortId));
         Assert.Single(afterDebit.Actors);
+
+        // Next tick: payroll disburses received wages (no residual).
+        var afterDisburse = ProductionTick.AdvanceTick(afterDebit);
+        Assert.Null(
+            afterDisburse.PortSignals.GetValueOrDefault(
+                new PortKey(MagicAgencySeed.PayrollNodeId, MagicAgencySeed.MoneyPortId)));
     }
 
     [Fact]
@@ -348,6 +363,41 @@ public sealed class MagicAgencyProductionTests
         Assert.Equal(
             new SignalValue.Money(5),
             Signal(next, MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId));
+        Assert.Null(
+            next.PortSignals.GetValueOrDefault(
+                new PortKey(MagicAgencySeed.PayrollNodeId, MagicAgencySeed.MoneyPortId)));
+    }
+
+    [Fact]
+    public void Payday_WithoutTreasuryFundingEdge_Throws()
+    {
+        var actors = ImmutableDictionary<ActorId, Actor>.Empty.Add(
+            MagicAgencySeed.ActorId,
+            new Actor(
+                MagicAgencySeed.ActorId,
+                Capacity: 1.0m,
+                ImmutableDictionary<string, double>.Empty.Add(ActorStatKeys.Payroll, 5)));
+
+        var seeded = MagicAgencySeed.CreateInitialState(DefaultConfigs, actors);
+        var edgesWithoutFunding = seeded.Graph.Edges
+            .Where(kv => kv.Key.Value != "treasury-to-payroll")
+            .ToImmutableDictionary();
+
+        var state = seeded with
+        {
+            Graph = new NodeGraph(seeded.Graph.Nodes, edgesWithoutFunding),
+            Assignments = ImmutableArray.Create(
+                new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.PayrollNodeId)),
+            PortSignals = ImmutableDictionary<PortKey, SignalValue>.Empty.Add(
+                new PortKey(MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId),
+                new SignalValue.Money(100)),
+            NodeTimers = ImmutableDictionary<NodeId, int>.Empty.Add(
+                MagicAgencySeed.PayrollNodeId,
+                0),
+        };
+
+        var ex = Assert.Throws<InvalidOperationException>(() => ProductionTick.AdvanceTick(state));
+        Assert.Contains("funding edge", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

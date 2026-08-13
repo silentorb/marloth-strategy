@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using System.Globalization;
-using System.Text;
 using MarlothStrategy.Simulation.Graph;
 using MarlothStrategy.Simulation.Production;
 
@@ -9,37 +8,58 @@ namespace MarlothStrategy.Console.Client;
 public static class TickReportPrinter
 {
     private const char Arrow = '\u2192';
+    public const string Title = "Marloth Strategy";
 
-    public static string FormatStateSnapshot(
+    public static string FormatScreen(
         GameState state,
         GameState? previous = null,
-        ProductionTickResult? tick = null)
+        ProductionTickResult? tick = null,
+        int width = PanelLayout.DefaultWidth)
     {
         ArgumentNullException.ThrowIfNull(state);
         _ = tick;
 
-        var sb = new StringBuilder();
-        sb.AppendLine($"## Tick {state.Tick}");
-        sb.AppendLine();
-        AppendActorsLine(sb, state, previous);
-        sb.AppendLine();
+        if (width < 10)
+        {
+            throw new ArgumentOutOfRangeException(nameof(width), width, "width must be at least 10.");
+        }
+
+        var header = new List<string>
+        {
+            Title,
+            $"Tick {state.Tick}",
+            FormatActorsLine(state, previous),
+        };
 
         var nodes = state.Graph.Nodes.Keys
             .OrderBy(id => id.Value, StringComparer.Ordinal)
             .ToArray();
 
-        for (var i = 0; i < nodes.Length; i++)
+        var leftSubpanels = new List<IReadOnlyList<string>>(nodes.Length);
+        foreach (var nodeId in nodes)
         {
-            if (i > 0)
-            {
-                sb.AppendLine();
-            }
-
-            AppendNodeBlock(sb, state, previous, nodes[i]);
+            leftSubpanels.Add(FormatNodeLines(state, previous, nodeId));
         }
 
-        return sb.ToString().TrimEnd();
+        var rightLines = FlowGraphPrinter.FormatLines(state);
+
+        // Prefer a wider left column for state text; remaining width for the graph.
+        var leftInteriorWidth = Math.Max(24, (width * 5) / 10 - 2);
+        var maxLeft = width - 5;
+        if (leftInteriorWidth > maxLeft)
+        {
+            leftInteriorWidth = maxLeft;
+        }
+
+        return PanelLayout.Compose(header, leftSubpanels, rightLines, width, leftInteriorWidth);
     }
+
+    /// <summary>Legacy name for the full panel screen (same as <see cref="FormatScreen"/>).</summary>
+    public static string FormatStateSnapshot(
+        GameState state,
+        GameState? previous = null,
+        ProductionTickResult? tick = null) =>
+        FormatScreen(state, previous, tick);
 
     public static string FormatSignal(SignalValue? value) => value switch
     {
@@ -50,17 +70,16 @@ public static class TickReportPrinter
         _ => throw new InvalidOperationException($"Unknown signal value kind: {value.GetType().Name}."),
     };
 
-    private static void AppendActorsLine(StringBuilder sb, GameState state, GameState? previous)
+    private static string FormatActorsLine(GameState state, GameState? previous)
     {
         var current = FormatActorRoster(state.Actors);
         if (previous is null)
         {
-            sb.AppendLine($"actors: {current}");
-            return;
+            return $"actors: {current}";
         }
 
         var prior = FormatActorRoster(previous.Actors);
-        sb.AppendLine($"actors: {FormatChange(prior, current)}");
+        return $"actors: {FormatChange(prior, current)}";
     }
 
     private static string FormatActorRoster(ImmutableDictionary<ActorId, Actor> actors)
@@ -75,13 +94,12 @@ public static class TickReportPrinter
             actors.Keys.OrderBy(id => id.Value, StringComparer.Ordinal).Select(id => id.Value));
     }
 
-    private static void AppendNodeBlock(
-        StringBuilder sb,
+    private static List<string> FormatNodeLines(
         GameState state,
         GameState? previous,
         NodeId nodeId)
     {
-        sb.AppendLine($"{nodeId.Value}:");
+        var lines = new List<string> { $"{nodeId.Value}:" };
 
         var node = state.Graph.Nodes[nodeId];
         var nodeType = state.Catalog.Get(node.Type);
@@ -96,7 +114,7 @@ public static class TickReportPrinter
             var port = nodeType.Inputs.TryGetValue(portId, out var inputPort)
                 ? inputPort
                 : nodeType.Outputs[portId];
-            AppendPort(sb, state, previous, nodeId, port);
+            AppendPort(lines, state, previous, nodeId, port);
         }
 
         if (ShowsTimer(node.Type))
@@ -104,29 +122,30 @@ public static class TickReportPrinter
             var timer = FormatInt(state.NodeTimers.GetValueOrDefault(nodeId, 0));
             if (previous is null)
             {
-                sb.AppendLine($"  timer: {timer}");
+                lines.Add($"  timer: {timer}");
             }
             else
             {
                 var priorTimer = FormatInt(previous.NodeTimers.GetValueOrDefault(nodeId, 0));
-                sb.AppendLine($"  timer: {FormatChange(priorTimer, timer)}");
+                lines.Add($"  timer: {FormatChange(priorTimer, timer)}");
             }
         }
 
         if (!ShowsProgress(node.Type))
         {
-            return;
+            return lines;
         }
 
         var progress = FormatRounded(state.NodeProgress.GetValueOrDefault(nodeId, 0));
         if (previous is null)
         {
-            sb.AppendLine($"  progress: {progress}");
-            return;
+            lines.Add($"  progress: {progress}");
+            return lines;
         }
 
         var priorProgress = FormatRounded(previous.NodeProgress.GetValueOrDefault(nodeId, 0));
-        sb.AppendLine($"  progress: {FormatChange(priorProgress, progress)}");
+        lines.Add($"  progress: {FormatChange(priorProgress, progress)}");
+        return lines;
     }
 
     private static bool ShowsProgress(NodeTypeId typeId) =>
@@ -140,7 +159,7 @@ public static class TickReportPrinter
         typeId == MagicAgencySeed.PayrollTypeId;
 
     private static void AppendPort(
-        StringBuilder sb,
+        List<string> lines,
         GameState state,
         GameState? previous,
         NodeId nodeId,
@@ -156,12 +175,12 @@ public static class TickReportPrinter
             var currentText = FormatResourceLeaf(current);
             if (previous is null)
             {
-                sb.AppendLine($"  {port.Id.Value}: {currentText}");
+                lines.Add($"  {port.Id.Value}: {currentText}");
                 return;
             }
 
             var priorText = FormatResourceLeaf(prior);
-            sb.AppendLine($"  {port.Id.Value}: {FormatChange(priorText, currentText)}");
+            lines.Add($"  {port.Id.Value}: {FormatChange(priorText, currentText)}");
             return;
         }
 
@@ -171,43 +190,43 @@ public static class TickReportPrinter
 
         if (currentInfo is null && (previous is null || priorInfo is null))
         {
-            sb.AppendLine($"  {port.Id.Value}: 0");
+            lines.Add($"  {port.Id.Value}: 0");
             return;
         }
 
         if (currentInfo is null && priorInfo is not null)
         {
-            sb.AppendLine($"  {port.Id.Value}:");
-            AppendEnchantmentLeaf(sb, "volume", FormatRounded(priorInfo.Volume), "0");
-            AppendEnchantmentLeaf(sb, "darkness", FormatRounded(priorInfo.Darkness), "0");
-            AppendEnchantmentLeaf(sb, "fallacy", FormatRounded(priorInfo.Fallacy), "0");
+            lines.Add($"  {port.Id.Value}:");
+            AppendEnchantmentLeaf(lines, "volume", FormatRounded(priorInfo.Volume), "0");
+            AppendEnchantmentLeaf(lines, "darkness", FormatRounded(priorInfo.Darkness), "0");
+            AppendEnchantmentLeaf(lines, "fallacy", FormatRounded(priorInfo.Fallacy), "0");
             return;
         }
 
         // current present
-        sb.AppendLine($"  {port.Id.Value}:");
+        lines.Add($"  {port.Id.Value}:");
         if (previous is null)
         {
-            sb.AppendLine($"    volume: {FormatRounded(currentInfo!.Volume)}");
-            sb.AppendLine($"    darkness: {FormatRounded(currentInfo.Darkness)}");
-            sb.AppendLine($"    fallacy: {FormatRounded(currentInfo.Fallacy)}");
+            lines.Add($"    volume: {FormatRounded(currentInfo!.Volume)}");
+            lines.Add($"    darkness: {FormatRounded(currentInfo.Darkness)}");
+            lines.Add($"    fallacy: {FormatRounded(currentInfo.Fallacy)}");
             return;
         }
 
         var priorVolume = priorInfo is null ? "0" : FormatRounded(priorInfo.Volume);
         var priorDarkness = priorInfo is null ? "0" : FormatRounded(priorInfo.Darkness);
         var priorFallacy = priorInfo is null ? "0" : FormatRounded(priorInfo.Fallacy);
-        AppendEnchantmentLeaf(sb, "volume", priorVolume, FormatRounded(currentInfo!.Volume));
-        AppendEnchantmentLeaf(sb, "darkness", priorDarkness, FormatRounded(currentInfo.Darkness));
-        AppendEnchantmentLeaf(sb, "fallacy", priorFallacy, FormatRounded(currentInfo.Fallacy));
+        AppendEnchantmentLeaf(lines, "volume", priorVolume, FormatRounded(currentInfo!.Volume));
+        AppendEnchantmentLeaf(lines, "darkness", priorDarkness, FormatRounded(currentInfo.Darkness));
+        AppendEnchantmentLeaf(lines, "fallacy", priorFallacy, FormatRounded(currentInfo.Fallacy));
     }
 
     private static void AppendEnchantmentLeaf(
-        StringBuilder sb,
+        List<string> lines,
         string name,
         string prior,
         string current) =>
-        sb.AppendLine($"    {name}: {FormatChange(prior, current)}");
+        lines.Add($"    {name}: {FormatChange(prior, current)}");
 
     private static string FormatResourceLeaf(SignalValue? value) => value switch
     {

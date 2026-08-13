@@ -116,21 +116,21 @@ Tunable numerics live in `config/node-types/{enchant,testing,sell,treasury,payro
 
 ### `treasury`
 
-- Input: `money` (committed stock on the port; never consumed as process input).
+- Input / output: `money` (committed stock on the input; never consumed as process input; successful **Out** applications **emit** on the output for edge routing).
 - Config: `effort` (seed `2`).
 - Stat: `treasury` (default `1`).
 - Always residuals the committed money pile.
-- Effective when pending queue non-empty. Gain progress when assigned; each application dequeues **one** move from the start-of-tick queue and subtracts `effort`. **In** adds to the pile. **Out** debits if pile ≥ amount; otherwise mass-quit (clear actors and assignments), drop the out-move, leave pile unchanged.
+- Effective when pending queue non-empty. Gain progress when assigned; each application dequeues **one** move from the start-of-tick queue and subtracts `effort`. **In** adds to the pile. **Out** debits if pile ≥ amount and emits that amount on the money output (routed by edges, e.g. to payroll); otherwise mass-quit (clear actors and assignments), drop the out-move, leave pile unchanged, emit nothing.
 - Does not process moves enqueued later in the same tick (no same-tick money chain).
 
 ### `payroll`
 
-- No ports.
+- Input: `money` (receives routed wage payouts; consumed/disbursed — not residualled across ticks).
 - Config: `defaultWage`, `period`, `effort` (seed `10` / `5` / `5`).
 - Stat: `payroll` (default `1`).
 - `GameState.NodeTimers[payroll]` is a countdown seeded to `period`.
 - **Timer (no actor):** when start-of-tick `remaining > 0`, end-of-tick sets `remaining - 1`. When start-of-tick `remaining == 0`, payday is due (timer unchanged unless payday application resets it to `period`).
-- **Payday due (start of tick `remaining == 0`):** effective for assignment. Gain progress when assigned; when `progress >= effort`, enqueue pending outbound for the wage total of all current actors, subtract effort, reset timer to `period`. Wage total `0` → reset timer without enqueue.
+- **Payday due (start of tick `remaining == 0`):** effective for assignment. Gain progress when assigned; when `progress >= effort`, if wage total `> 0` require at least one funding edge from a treasury `money` port to this node’s `money` input, then enqueue pending outbound for the wage total of all current actors; subtract effort; reset timer to `period`. Missing funding edge with wage total `> 0` is fail-fast. Wage total `0` → reset timer without enqueue.
 - Effective wage per actor = actor `Wage` if set, else `defaultWage`. Shortfall / mass-quit runs when treasury applies the out-move.
 - v1: exactly one `payroll` and one `treasury` node in the seed graph; missing/duplicate is fail-fast.
 
@@ -150,8 +150,8 @@ Pipeline (each step returns new data; no mutation of prior state):
 
 1. **`ResolveInputs`** — For each node input port, take the value already committed on that port.
 2. **`ResolveEffectiveAssignments` / assignment effort** — Filter preferred assignments by prerequisites; split capacity.
-3. **`ComputeOutputs`** — Node-type-specific behavior using each node’s port inputs, assignment effort, stats, progress, and start-of-tick pending moves. Nodes are independent (no same-tick money chain). Node iteration order must not change results. May enqueue payroll outbound onto a next-pending builder; treasury only drains the start-of-tick queue into residuals / actor updates.
-4. **`CommitSignals`** — Residuals; route outputs (information set if empty / skip if occupied; money to treasury **enqueues inbound** on the pending builder).
+3. **`ComputeOutputs`** — Node-type-specific behavior using each node’s port inputs, assignment effort, stats, progress, and start-of-tick pending moves. Nodes are independent (no same-tick money chain). Node iteration order must not change results. May enqueue payroll outbound onto a next-pending builder (when a treasury→payroll money funding edge exists); treasury only drains the start-of-tick queue into residuals / actor updates and may emit money on successful outs.
+4. **`CommitSignals`** — Residuals; route outputs (information set if empty / skip if occupied; money to treasury **enqueues inbound** on the pending builder; other money edges **AddResource** as usual, including treasury→payroll wage delivery).
 5. **`AdvancePayrollTimer`** — If payroll remaining `> 0`, decrement by 1 (no auto-pay).
 6. **`NextState`** — New signals, updated progress/timers/pending maps, actors/assignments, `Tick + 1`.
 
@@ -167,9 +167,9 @@ state = AdvanceTick(state); // mutable binding, immutable values
 
 Factory: `MagicAgencySeed.CreateInitialState()` (loads node configs and actors from `config/` under the app base directory; overloads accept explicit configs/actors).
 
-- Node types: `enchant` (in/out `enchantment`), `testing` (in/out `enchantment`), `sell` (in `enchantment`, out `money`), `treasury` (in `money`), `payroll` (no ports).
+- Node types: `enchant` (in/out `enchantment`), `testing` (in/out `enchantment`), `sell` (in `enchantment`, out `money`), `treasury` (in/out `money`), `payroll` (in `money`).
 - Nodes: `enchant`, `testing`, `sell`, `treasury`, `payroll`.
-- Edges: `enchant.enchantment` → `enchant.enchantment`; `enchant.enchantment` → `testing.enchantment`; `testing.enchantment` → `sell.enchantment`; `sell.money` → `treasury.money` (pending inbound on commit).
+- Edges: `enchant.enchantment` → `enchant.enchantment`; `enchant.enchantment` → `testing.enchantment`; `testing.enchantment` → `sell.enchantment`; `sell.money` → `treasury.money` (pending inbound on commit); `treasury.money` → `payroll.money` (wage funding / out delivery).
 - Actor `intern` from JSON (capacity `1.0`, stats as configured, wage unset), preferred assignments to enchant, testing, sell, treasury, and payroll.
 - Initial signals: `enchant.enchantment = (0,0,0)`, `treasury.money = 100`; progress empty/`0`; payroll timer = `period`; pending money moves empty; `Tick = 0`.
 
