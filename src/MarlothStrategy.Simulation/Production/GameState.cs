@@ -12,4 +12,5 @@ public sealed record GameState(
     NodeTypeConfigs NodeConfigs,
     ImmutableDictionary<NodeId, double> NodeProgress,
     ImmutableDictionary<NodeId, int> NodeTimers,
+    ImmutableArray<PendingMoneyMove> PendingMoneyMoves,
     int Tick);

@@ -32,15 +32,23 @@ public static class NodeTypeConfigLoader
                 dto.DarknessDelta,
                 dto.FallacyConstant));
 
+        var testing = ReadRequired<TestingNodeConfigDto, TestingNodeConfig>(
+            Path.Combine(directory, "testing.json"),
+            dto => new TestingNodeConfig(dto.Effort, dto.FallacyReduction));
+
         var sell = ReadRequired<SellNodeConfigDto, SellNodeConfig>(
             Path.Combine(directory, "sell.json"),
             dto => new SellNodeConfig(dto.Effort, dto.PayoutFloor));
 
+        var treasury = ReadRequired<TreasuryNodeConfigDto, TreasuryNodeConfig>(
+            Path.Combine(directory, "treasury.json"),
+            dto => new TreasuryNodeConfig(dto.Effort));
+
         var payroll = ReadRequired<PayrollNodeConfigDto, PayrollNodeConfig>(
             Path.Combine(directory, "payroll.json"),
-            dto => new PayrollNodeConfig(dto.DefaultWage, dto.Period));
+            dto => new PayrollNodeConfig(dto.DefaultWage, dto.Period, dto.Effort));
 
-        return new NodeTypeConfigs(enchant, sell, payroll);
+        return new NodeTypeConfigs(enchant, testing, sell, treasury, payroll);
     }
 
     private static TConfig ReadRequired<TDto, TConfig>(
@@ -85,6 +93,15 @@ public static class NodeTypeConfigLoader
         public double FallacyConstant { get; init; }
     }
 
+    private sealed class TestingNodeConfigDto
+    {
+        [JsonRequired]
+        public double Effort { get; init; }
+
+        [JsonRequired]
+        public double FallacyReduction { get; init; }
+    }
+
     private sealed class SellNodeConfigDto
     {
         [JsonRequired]
@@ -94,6 +111,12 @@ public static class NodeTypeConfigLoader
         public double PayoutFloor { get; init; }
     }
 
+    private sealed class TreasuryNodeConfigDto
+    {
+        [JsonRequired]
+        public double Effort { get; init; }
+    }
+
     private sealed class PayrollNodeConfigDto
     {
         [JsonRequired]
@@ -101,5 +124,8 @@ public static class NodeTypeConfigLoader
 
         [JsonRequired]
         public int Period { get; init; }
+
+        [JsonRequired]
+        public double Effort { get; init; }
     }
 }

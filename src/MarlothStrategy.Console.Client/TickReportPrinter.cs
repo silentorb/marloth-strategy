@@ -130,7 +130,11 @@ public static class TickReportPrinter
     }
 
     private static bool ShowsProgress(NodeTypeId typeId) =>
-        typeId == MagicAgencySeed.EnchantTypeId || typeId == MagicAgencySeed.SellTypeId;
+        typeId == MagicAgencySeed.EnchantTypeId
+        || typeId == MagicAgencySeed.TestingTypeId
+        || typeId == MagicAgencySeed.SellTypeId
+        || typeId == MagicAgencySeed.TreasuryTypeId
+        || typeId == MagicAgencySeed.PayrollTypeId;
 
     private static bool ShowsTimer(NodeTypeId typeId) =>
         typeId == MagicAgencySeed.PayrollTypeId;

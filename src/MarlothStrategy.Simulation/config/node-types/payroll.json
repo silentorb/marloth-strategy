@@ -1,4 +1,5 @@
 {
   "defaultWage": 10,
-  "period": 5
+  "period": 5,
+  "effort": 5
 }

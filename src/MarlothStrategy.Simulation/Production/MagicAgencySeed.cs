@@ -6,11 +6,13 @@ namespace MarlothStrategy.Simulation.Production;
 public static class MagicAgencySeed
 {
     public static readonly NodeTypeId EnchantTypeId = new("enchant");
+    public static readonly NodeTypeId TestingTypeId = new("testing");
     public static readonly NodeTypeId SellTypeId = new("sell");
     public static readonly NodeTypeId TreasuryTypeId = new("treasury");
     public static readonly NodeTypeId PayrollTypeId = new("payroll");
 
     public static readonly NodeId EnchantNodeId = new("enchant");
+    public static readonly NodeId TestingNodeId = new("testing");
     public static readonly NodeId SellNodeId = new("sell");
     public static readonly NodeId TreasuryNodeId = new("treasury");
     public static readonly NodeId PayrollNodeId = new("payroll");
@@ -57,6 +59,13 @@ public static class MagicAgencySeed
             ImmutableDictionary<PortId, Port>.Empty
                 .Add(EnchantmentPortId, new Port(EnchantmentPortId, enchantmentType)));
 
+        var testingType = new NodeType(
+            TestingTypeId,
+            ImmutableDictionary<PortId, Port>.Empty
+                .Add(EnchantmentPortId, new Port(EnchantmentPortId, enchantmentType)),
+            ImmutableDictionary<PortId, Port>.Empty
+                .Add(EnchantmentPortId, new Port(EnchantmentPortId, enchantmentType)));
+
         var sellType = new NodeType(
             SellTypeId,
             ImmutableDictionary<PortId, Port>.Empty
@@ -79,6 +88,7 @@ public static class MagicAgencySeed
         var catalog = new NodeTypeCatalog(
             ImmutableDictionary<NodeTypeId, NodeType>.Empty
                 .Add(EnchantTypeId, enchantType)
+                .Add(TestingTypeId, testingType)
                 .Add(SellTypeId, sellType)
                 .Add(TreasuryTypeId, treasuryType)
                 .Add(PayrollTypeId, payrollType));
@@ -86,6 +96,7 @@ public static class MagicAgencySeed
         var graph = new NodeGraph(
             ImmutableDictionary<NodeId, Node>.Empty
                 .Add(EnchantNodeId, new Node(EnchantNodeId, EnchantTypeId))
+                .Add(TestingNodeId, new Node(TestingNodeId, TestingTypeId))
                 .Add(SellNodeId, new Node(SellNodeId, SellTypeId))
                 .Add(TreasuryNodeId, new Node(TreasuryNodeId, TreasuryTypeId))
                 .Add(PayrollNodeId, new Node(PayrollNodeId, PayrollTypeId)),
@@ -96,9 +107,14 @@ public static class MagicAgencySeed
                         new PortReference(EnchantNodeId, EnchantmentPortId),
                         new PortReference(EnchantNodeId, EnchantmentPortId)))
                 .Add(
-                    new EdgeId("enchantment-to-sell"),
+                    new EdgeId("enchantment-to-testing"),
                     new Edge(
                         new PortReference(EnchantNodeId, EnchantmentPortId),
+                        new PortReference(TestingNodeId, EnchantmentPortId)))
+                .Add(
+                    new EdgeId("testing-to-sell"),
+                    new Edge(
+                        new PortReference(TestingNodeId, EnchantmentPortId),
                         new PortReference(SellNodeId, EnchantmentPortId)))
                 .Add(
                     new EdgeId("money-to-treasury"),
@@ -108,7 +124,10 @@ public static class MagicAgencySeed
 
         var assignments = ImmutableArray.Create(
             new Assignment(ActorId, EnchantNodeId),
-            new Assignment(ActorId, SellNodeId));
+            new Assignment(ActorId, TestingNodeId),
+            new Assignment(ActorId, SellNodeId),
+            new Assignment(ActorId, TreasuryNodeId),
+            new Assignment(ActorId, PayrollNodeId));
 
         var signals = ImmutableDictionary<PortKey, SignalValue>.Empty
             .Add(
@@ -130,6 +149,7 @@ public static class MagicAgencySeed
             nodeConfigs,
             ImmutableDictionary<NodeId, double>.Empty,
             timers,
+            ImmutableArray<PendingMoneyMove>.Empty,
             Tick: 0);
     }
 }

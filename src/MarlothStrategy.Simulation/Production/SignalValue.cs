@@ -37,6 +37,11 @@ public abstract record SignalValue(SignalTypeId TypeId)
                 Fallacy + Darkness + config.FallacyConstant);
         }
 
+        public Enchantment ReduceFallacy(double amount)
+        {
+            return new(Volume, Darkness, Math.Max(0, Fallacy - amount));
+        }
+
         public double SellPayout(SellNodeConfig config)
         {
             ArgumentNullException.ThrowIfNull(config);

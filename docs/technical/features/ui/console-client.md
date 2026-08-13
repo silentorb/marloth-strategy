@@ -46,7 +46,7 @@ Rules:
 | Ports | Union of the node type’s input and output ports (ordinal by port id). Same-named input/output ports share one committed `PortSignals` stock and one display entry |
 | Money (resource) | Committed stock on the port with change arrows from the prior tick (`previous → current` when different). Tick 0 shows committed stock only. Missing stock displays as `0`; numerics **rounded** to nearest integer |
 | Enchantment (information) | Nested `volume` / `darkness` / `fallacy` when present; absent displays as `0`; same rounding; change arrows from prior committed stock |
-| Progress | Shown only for node types with work `effort` (`enchant`, `sell`). Rounded numeric from `NodeProgress` (default `0`) |
+| Progress | Shown for all seed node types (`enchant`, `testing`, `sell`, `treasury`, `payroll`). Rounded numeric from `NodeProgress` (default `0`) |
 | Timer | Shown for `payroll` from `NodeTimers` (rounded display as integer string); change arrows when previous state is supplied |
 | Change annotations | When a previous state is supplied, compare rounded display strings per leaf; if different, print `previous → current` (U+2192); if equal, print current only. Tick 0 has no previous state (no arrows). Empty leaves use `0` (never `-`) |
 
