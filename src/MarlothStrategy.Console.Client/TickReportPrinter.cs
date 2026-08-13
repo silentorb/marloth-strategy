@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Globalization;
 using System.Text;
 using MarlothStrategy.Simulation.Graph;
@@ -9,13 +10,19 @@ public static class TickReportPrinter
 {
     private const char Arrow = '\u2192';
 
-    public static string FormatStateSnapshot(GameState state, GameState? previous = null)
+    public static string FormatStateSnapshot(
+        GameState state,
+        GameState? previous = null,
+        ProductionTickResult? tick = null)
     {
         ArgumentNullException.ThrowIfNull(state);
 
         var sb = new StringBuilder();
         sb.AppendLine($"## Tick {state.Tick}");
         sb.AppendLine();
+
+        var rowsByNode = tick?.Nodes.ToDictionary(r => r.NodeId) ??
+            new Dictionary<NodeId, NodeIoRow>();
 
         var nodes = state.Graph.Nodes.Keys
             .OrderBy(id => id.Value, StringComparer.Ordinal)
@@ -28,7 +35,8 @@ public static class TickReportPrinter
                 sb.AppendLine();
             }
 
-            AppendNodeBlock(sb, state, previous, nodes[i]);
+            rowsByNode.TryGetValue(nodes[i], out var row);
+            AppendNodeBlock(sb, state, previous, nodes[i], row);
         }
 
         return sb.ToString().TrimEnd();
@@ -36,7 +44,7 @@ public static class TickReportPrinter
 
     public static string FormatSignal(SignalValue? value) => value switch
     {
-        null => "-",
+        null => "0",
         SignalValue.Money m => FormatRounded(m.Amount),
         SignalValue.Enchantment e =>
             $"{FormatRounded(e.Volume)}/{FormatRounded(e.Darkness)}/{FormatRounded(e.Fallacy)}",
@@ -47,12 +55,14 @@ public static class TickReportPrinter
         StringBuilder sb,
         GameState state,
         GameState? previous,
-        NodeId nodeId)
+        NodeId nodeId,
+        NodeIoRow? tickRow)
     {
         sb.AppendLine($"{nodeId.Value}:");
 
         var node = state.Graph.Nodes[nodeId];
         var nodeType = state.Catalog.Get(node.Type);
+        // Same-named input/output ports share one PortSignals stock and one display entry.
         var ports = nodeType.Inputs.Keys
             .Concat(nodeType.Outputs.Keys)
             .Distinct()
@@ -63,7 +73,7 @@ public static class TickReportPrinter
             var port = nodeType.Inputs.TryGetValue(portId, out var inputPort)
                 ? inputPort
                 : nodeType.Outputs[portId];
-            AppendPort(sb, state, previous, nodeId, port);
+            AppendPort(sb, state, previous, nodeId, port, tickRow);
         }
 
         var progress = FormatRounded(state.NodeProgress.GetValueOrDefault(nodeId, 0));
@@ -82,7 +92,8 @@ public static class TickReportPrinter
         GameState state,
         GameState? previous,
         NodeId nodeId,
-        Port port)
+        Port port,
+        NodeIoRow? tickRow)
     {
         var key = new PortKey(nodeId, port.Id);
         var current = state.PortSignals.GetValueOrDefault(key);
@@ -91,6 +102,15 @@ public static class TickReportPrinter
 
         if (kind == SignalKind.Resource)
         {
+            // Money is a continuous transform through the node, not per-node ownership.
+            if (previous is not null &&
+                tickRow is { MoneyIn: { } moneyIn, MoneyOut: { } moneyOut })
+            {
+                sb.AppendLine(
+                    $"  {port.Id.Value}: {FormatChange(FormatRounded(moneyIn), FormatRounded(moneyOut))}");
+                return;
+            }
+
             var currentText = FormatResourceLeaf(current);
             if (previous is null)
             {
@@ -103,22 +123,22 @@ public static class TickReportPrinter
             return;
         }
 
-        // Information
+        // Information — empty stock displays as 0 (same sentinel as money).
         var currentInfo = current as SignalValue.Enchantment;
         var priorInfo = prior as SignalValue.Enchantment;
 
         if (currentInfo is null && (previous is null || priorInfo is null))
         {
-            sb.AppendLine($"  {port.Id.Value}: -");
+            sb.AppendLine($"  {port.Id.Value}: 0");
             return;
         }
 
         if (currentInfo is null && priorInfo is not null)
         {
             sb.AppendLine($"  {port.Id.Value}:");
-            AppendEnchantmentLeaf(sb, "volume", FormatRounded(priorInfo.Volume), "-");
-            AppendEnchantmentLeaf(sb, "darkness", FormatRounded(priorInfo.Darkness), "-");
-            AppendEnchantmentLeaf(sb, "fallacy", FormatRounded(priorInfo.Fallacy), "-");
+            AppendEnchantmentLeaf(sb, "volume", FormatRounded(priorInfo.Volume), "0");
+            AppendEnchantmentLeaf(sb, "darkness", FormatRounded(priorInfo.Darkness), "0");
+            AppendEnchantmentLeaf(sb, "fallacy", FormatRounded(priorInfo.Fallacy), "0");
             return;
         }
 
@@ -132,9 +152,9 @@ public static class TickReportPrinter
             return;
         }
 
-        var priorVolume = priorInfo is null ? "-" : FormatRounded(priorInfo.Volume);
-        var priorDarkness = priorInfo is null ? "-" : FormatRounded(priorInfo.Darkness);
-        var priorFallacy = priorInfo is null ? "-" : FormatRounded(priorInfo.Fallacy);
+        var priorVolume = priorInfo is null ? "0" : FormatRounded(priorInfo.Volume);
+        var priorDarkness = priorInfo is null ? "0" : FormatRounded(priorInfo.Darkness);
+        var priorFallacy = priorInfo is null ? "0" : FormatRounded(priorInfo.Fallacy);
         AppendEnchantmentLeaf(sb, "volume", priorVolume, FormatRounded(currentInfo!.Volume));
         AppendEnchantmentLeaf(sb, "darkness", priorDarkness, FormatRounded(currentInfo.Darkness));
         AppendEnchantmentLeaf(sb, "fallacy", priorFallacy, FormatRounded(currentInfo.Fallacy));

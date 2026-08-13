@@ -10,7 +10,7 @@ public abstract record SignalValue(SignalTypeId TypeId)
 {
     public abstract SignalKind Kind { get; }
 
-    /// <summary>Resource: money quantity. Added and subtracted when routed or consumed.</summary>
+    /// <summary>Resource: continuous money quantity. Forwarded (set) when routed; costs subtract, sell may increment.</summary>
     public sealed record Money(double Amount) : SignalValue(SignalTypes.Money)
     {
         public override SignalKind Kind => SignalKind.Resource;

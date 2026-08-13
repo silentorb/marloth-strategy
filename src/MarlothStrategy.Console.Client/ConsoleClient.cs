@@ -34,7 +34,7 @@ public static class ConsoleClient
                     var previous = state;
                     var result = ProductionTick.AdvanceTickWithReport(state);
                     state = result.State;
-                    System.Console.WriteLine(TickReportPrinter.FormatStateSnapshot(state, previous));
+                    System.Console.WriteLine(TickReportPrinter.FormatStateSnapshot(state, previous, result));
                     System.Console.WriteLine();
                     break;
             }

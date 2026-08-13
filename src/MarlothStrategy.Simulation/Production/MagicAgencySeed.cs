@@ -45,15 +45,15 @@ public static class MagicAgencySeed
             ImmutableDictionary<PortId, Port>.Empty
                 .Add(EnchantmentPortId, new Port(EnchantmentPortId, enchantmentType))
                 .Add(MoneyPortId, new Port(MoneyPortId, moneyType)),
-            ImmutableDictionary<PortId, Port>.Empty.Add(
-                EnchantmentPortId,
-                new Port(EnchantmentPortId, enchantmentType)));
+            ImmutableDictionary<PortId, Port>.Empty
+                .Add(EnchantmentPortId, new Port(EnchantmentPortId, enchantmentType))
+                .Add(MoneyPortId, new Port(MoneyPortId, moneyType)));
 
         var sellType = new NodeType(
             SellTypeId,
-            ImmutableDictionary<PortId, Port>.Empty.Add(
-                EnchantmentPortId,
-                new Port(EnchantmentPortId, enchantmentType)),
+            ImmutableDictionary<PortId, Port>.Empty
+                .Add(EnchantmentPortId, new Port(EnchantmentPortId, enchantmentType))
+                .Add(MoneyPortId, new Port(MoneyPortId, moneyType)),
             ImmutableDictionary<PortId, Port>.Empty.Add(
                 MoneyPortId,
                 new Port(MoneyPortId, moneyType)));
@@ -79,7 +79,12 @@ public static class MagicAgencySeed
                         new PortReference(EnchantNodeId, EnchantmentPortId),
                         new PortReference(SellNodeId, EnchantmentPortId)))
                 .Add(
-                    new EdgeId("money"),
+                    new EdgeId("money-to-sell"),
+                    new Edge(
+                        new PortReference(EnchantNodeId, MoneyPortId),
+                        new PortReference(SellNodeId, MoneyPortId)))
+                .Add(
+                    new EdgeId("money-to-enchant"),
                     new Edge(
                         new PortReference(SellNodeId, MoneyPortId),
                         new PortReference(EnchantNodeId, MoneyPortId))));

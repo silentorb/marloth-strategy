@@ -28,12 +28,12 @@ public static class ProductionTick
         var reportOrder = nodeOrder as IReadOnlyList<NodeId> ?? nodeOrder.ToArray();
         var resolvedInputs = ResolveInputs(state, OrderNodes(state.Graph.Nodes.Keys));
         var effortByNode = ResolveEffortByNode(state, resolvedInputs);
-        var (residuals, outputs, rows, nextProgress, treasuryDebits) = ComputeOutputs(
+        var (residuals, outputs, rows, nextProgress) = ComputeOutputs(
             state,
             reportOrder,
             resolvedInputs,
             effortByNode);
-        var nextSignals = CommitSignals(state, residuals, outputs, treasuryDebits);
+        var nextSignals = CommitSignals(state, residuals, outputs);
 
         var nextState = state with
         {
@@ -184,21 +184,12 @@ public static class ProductionTick
         ImmutableDictionary<PortKey, SignalValue> Residuals,
         ImmutableDictionary<PortKey, SignalValue> Outputs,
         ImmutableArray<NodeIoRow> Rows,
-        ImmutableDictionary<NodeId, double> NextProgress,
-        double TreasuryDebits) ComputeOutputs(
+        ImmutableDictionary<NodeId, double> NextProgress) ComputeOutputs(
         GameState state,
         IReadOnlyList<NodeId> reportOrder,
         ImmutableDictionary<PortKey, SignalValue> resolvedInputs,
         ImmutableDictionary<NodeId, decimal> effortByNode)
     {
-        var treasuryAvailable = 0.0;
-        var treasuryKey = new PortKey(MagicAgencySeed.EnchantNodeId, MagicAgencySeed.MoneyPortId);
-        if (resolvedInputs.TryGetValue(treasuryKey, out var treasurySignal) &&
-            treasurySignal is SignalValue.Money moneyStock)
-        {
-            treasuryAvailable = moneyStock.Amount;
-        }
-
         var drafts = new Dictionary<NodeId, NodeDraft>();
         foreach (var nodeId in OrderNodes(state.Graph.Nodes.Keys))
         {
@@ -234,33 +225,86 @@ public static class ProductionTick
             }
         }
 
-        var remainingMoney = treasuryAvailable;
+        // Same-tick money chain: start from enchant's money port when present, else sell's.
+        var remainingForGrants = ResolveCycleMoneyStart(drafts);
         var grantedByNode = new Dictionary<NodeId, int>();
         foreach (var nodeId in OrderNodes(drafts.Keys))
         {
             var draft = drafts[nodeId];
             var maxByMoney = draft.CostPerApplication <= 0
                 ? draft.DesiredApplications
-                : (int)Math.Floor(remainingMoney / draft.CostPerApplication);
+                : (int)Math.Floor(remainingForGrants / draft.CostPerApplication);
             var granted = Math.Min(draft.DesiredApplications, Math.Max(0, maxByMoney));
             grantedByNode[nodeId] = granted;
-            remainingMoney -= granted * draft.CostPerApplication;
+            remainingForGrants -= granted * draft.CostPerApplication;
         }
+
+        // Recompute continuous money through enchant then sell (pass-through or increment).
+        var moneyStart = ResolveCycleMoneyStart(drafts);
+        var money = moneyStart;
+        double? moneyAfterEnchant = null;
+        double? moneyAfterSell = null;
+        double sellMoneyIn = moneyStart;
+        double sellMoneyOut = moneyStart;
+        foreach (var nodeId in OrderNodes(drafts.Keys))
+        {
+            var draft = drafts[nodeId];
+            var granted = grantedByNode[nodeId];
+            if (draft.IsEnchant)
+            {
+                money -= granted * draft.CostPerApplication;
+                moneyAfterEnchant = money;
+            }
+            else
+            {
+                // Sell pass-throughs money, or increments by payout when a sale completes (no cost).
+                var incoming = moneyAfterEnchant ?? moneyStart;
+                if (granted >= 1 && draft.Available is SignalValue.Enchantment toSell)
+                {
+                    money = incoming + toSell.SellPayout(state.NodeConfigs.Sell);
+                    sellMoneyIn = incoming;
+                    sellMoneyOut = money;
+                }
+                else
+                {
+                    money = incoming;
+                    sellMoneyIn = incoming;
+                    sellMoneyOut = incoming;
+                }
+
+                moneyAfterSell = money;
+            }
+        }
+
+        // Commit the settled cycle value on every money output so both ports stay aligned.
+        var settledMoney = moneyAfterSell ?? moneyAfterEnchant;
 
         var residuals = ImmutableDictionary.CreateBuilder<PortKey, SignalValue>();
         var outputs = ImmutableDictionary.CreateBuilder<PortKey, SignalValue>();
         var nextProgress = ImmutableDictionary.CreateBuilder<NodeId, double>();
         var rowByNode = new Dictionary<NodeId, NodeIoRow>();
-        var treasuryDebits = 0.0;
 
         foreach (var nodeId in OrderNodes(drafts.Keys))
         {
             var draft = drafts[nodeId];
             var granted = grantedByNode[nodeId];
-            var applied = ApplyDraft(draft, granted, state.NodeConfigs, residuals, outputs);
-            rowByNode[nodeId] = applied.Row;
+            var applied = ApplyDraft(
+                draft,
+                granted,
+                state.NodeConfigs,
+                settledMoney,
+                residuals,
+                outputs);
+            var moneyIn = draft.IsEnchant ? moneyStart : sellMoneyIn;
+            var moneyOut = draft.IsEnchant
+                ? (moneyAfterEnchant ?? moneyStart)
+                : sellMoneyOut;
+            rowByNode[nodeId] = applied.Row with
+            {
+                MoneyIn = moneyIn,
+                MoneyOut = moneyOut,
+            };
             nextProgress[nodeId] = applied.Progress;
-            treasuryDebits += granted * draft.CostPerApplication;
         }
 
         foreach (var (id, value) in state.NodeProgress)
@@ -281,8 +325,33 @@ public static class ProductionTick
             residuals.ToImmutable(),
             outputs.ToImmutable(),
             rows.ToImmutable(),
-            nextProgress.ToImmutable(),
-            treasuryDebits);
+            nextProgress.ToImmutable());
+    }
+
+    /// <summary>
+    /// Continuous money cycle start: prefer an enchant-type node's money input, else any sell money input.
+    /// </summary>
+    private static double ResolveCycleMoneyStart(IReadOnlyDictionary<NodeId, NodeDraft> drafts)
+    {
+        foreach (var nodeId in OrderNodes(drafts.Keys))
+        {
+            var draft = drafts[nodeId];
+            if (draft.IsEnchant && draft.Money is SignalValue.Money enchantMoney)
+            {
+                return enchantMoney.Amount;
+            }
+        }
+
+        foreach (var nodeId in OrderNodes(drafts.Keys))
+        {
+            var draft = drafts[nodeId];
+            if (!draft.IsEnchant && draft.Money is SignalValue.Money sellMoney)
+            {
+                return sellMoney.Amount;
+            }
+        }
+
+        return 0;
     }
 
     private sealed record NodeDraft(
@@ -312,7 +381,8 @@ public static class ProductionTick
 
         if (!nodeType.Inputs.ContainsKey(enchantmentPort) ||
             !nodeType.Inputs.ContainsKey(moneyPort) ||
-            !nodeType.Outputs.ContainsKey(enchantmentPort))
+            !nodeType.Outputs.ContainsKey(enchantmentPort) ||
+            !nodeType.Outputs.ContainsKey(moneyPort))
         {
             throw new InvalidOperationException(
                 $"Node type '{nodeType.Id}' does not match enchant port layout.");
@@ -371,6 +441,7 @@ public static class ProductionTick
         var moneyPort = MagicAgencySeed.MoneyPortId;
 
         if (!nodeType.Inputs.ContainsKey(enchantmentPort) ||
+            !nodeType.Inputs.ContainsKey(moneyPort) ||
             !nodeType.Outputs.ContainsKey(moneyPort))
         {
             throw new InvalidOperationException(
@@ -378,6 +449,7 @@ public static class ProductionTick
         }
 
         resolvedInputs.TryGetValue(new PortKey(nodeId, enchantmentPort), out var available);
+        resolvedInputs.TryGetValue(new PortKey(nodeId, moneyPort), out var money);
 
         var progressAfterGain = progress;
         if (assignmentEffort > 0m && available is SignalValue.Enchantment)
@@ -403,29 +475,28 @@ public static class ProductionTick
             assignmentEffort,
             progressAfterGain,
             config.Effort,
-            config.Cost,
+            CostPerApplication: 0,
             desired,
             available,
-            Money: null);
+            money);
     }
 
     private static AppliedDraft ApplyDraft(
         NodeDraft draft,
         int granted,
         NodeTypeConfigs configs,
+        double? moneyOut,
         ImmutableDictionary<PortKey, SignalValue>.Builder residuals,
         ImmutableDictionary<PortKey, SignalValue>.Builder outputs)
     {
-        var enchantmentPort = MagicAgencySeed.EnchantmentPortId;
-        var moneyPort = MagicAgencySeed.MoneyPortId;
         var progress = draft.ProgressAfterGain - (granted * draft.WorkEffort);
 
         if (draft.IsEnchant)
         {
-            return ApplyEnchant(draft, granted, configs.Enchant, progress, residuals, outputs);
+            return ApplyEnchant(draft, granted, configs.Enchant, progress, moneyOut, residuals, outputs);
         }
 
-        return ApplySell(draft, granted, configs.Sell, progress, residuals, outputs);
+        return ApplySell(draft, granted, progress, moneyOut, residuals, outputs);
     }
 
     private static AppliedDraft ApplyEnchant(
@@ -433,22 +504,20 @@ public static class ProductionTick
         int granted,
         EnchantNodeConfig config,
         double progress,
+        double? moneyOut,
         ImmutableDictionary<PortKey, SignalValue>.Builder residuals,
         ImmutableDictionary<PortKey, SignalValue>.Builder outputs)
     {
         var enchantmentPort = MagicAgencySeed.EnchantmentPortId;
         var moneyPort = MagicAgencySeed.MoneyPortId;
         var enchantmentKey = new PortKey(draft.NodeId, enchantmentPort);
-        var moneyKey = new PortKey(draft.NodeId, moneyPort);
+        var moneyOutputKey = new PortKey(draft.NodeId, moneyPort);
         var outputKey = new PortKey(draft.NodeId, enchantmentPort);
+
+        EmitMoneyOutput(outputs, moneyOutputKey, moneyOut);
 
         if (draft.AssignmentEffort <= 0m || draft.Available is not SignalValue.Enchantment starting)
         {
-            if (draft.Money is not null)
-            {
-                residuals[moneyKey] = draft.Money;
-            }
-
             if (draft.Available is not null)
             {
                 residuals[enchantmentKey] = draft.Available;
@@ -477,10 +546,6 @@ public static class ProductionTick
 
         // Mutate or pass-through: consume and emit when assigned with input.
         outputs[outputKey] = current;
-        if (draft.Money is not null)
-        {
-            residuals[moneyKey] = draft.Money;
-        }
 
         return new AppliedDraft(
             new NodeIoRow(
@@ -500,20 +565,20 @@ public static class ProductionTick
     private static AppliedDraft ApplySell(
         NodeDraft draft,
         int granted,
-        SellNodeConfig config,
         double progress,
+        double? moneyOut,
         ImmutableDictionary<PortKey, SignalValue>.Builder residuals,
         ImmutableDictionary<PortKey, SignalValue>.Builder outputs)
     {
         var enchantmentPort = MagicAgencySeed.EnchantmentPortId;
         var moneyPort = MagicAgencySeed.MoneyPortId;
         var inputKey = new PortKey(draft.NodeId, enchantmentPort);
-        var outputKey = new PortKey(draft.NodeId, moneyPort);
+        var moneyOutputKey = new PortKey(draft.NodeId, moneyPort);
 
-        if (granted >= 1 && draft.Available is SignalValue.Enchantment toSell)
+        var producedMoney = EmitMoneyOutput(outputs, moneyOutputKey, moneyOut);
+
+        if (granted >= 1 && draft.Available is SignalValue.Enchantment)
         {
-            var produced = new SignalValue.Money(toSell.SellPayout(config));
-            outputs[outputKey] = produced;
             return new AppliedDraft(
                 new NodeIoRow(
                     draft.NodeId,
@@ -525,7 +590,7 @@ public static class ProductionTick
                     Residual: null,
                     moneyPort,
                     SignalTypes.Money,
-                    produced),
+                    producedMoney),
                 progress);
         }
 
@@ -545,15 +610,29 @@ public static class ProductionTick
                 draft.Available,
                 moneyPort,
                 SignalTypes.Money,
-                Produced: null),
+                producedMoney),
             draft.ProgressAfterGain);
+    }
+
+    private static SignalValue.Money? EmitMoneyOutput(
+        ImmutableDictionary<PortKey, SignalValue>.Builder outputs,
+        PortKey moneyOutputKey,
+        double? moneyOut)
+    {
+        if (moneyOut is null)
+        {
+            return null;
+        }
+
+        var produced = new SignalValue.Money(moneyOut.Value);
+        outputs[moneyOutputKey] = produced;
+        return produced;
     }
 
     private static ImmutableDictionary<PortKey, SignalValue> CommitSignals(
         GameState state,
         ImmutableDictionary<PortKey, SignalValue> residuals,
-        ImmutableDictionary<PortKey, SignalValue> outputs,
-        double treasuryDebits)
+        ImmutableDictionary<PortKey, SignalValue> outputs)
     {
         var next = residuals.ToBuilder();
 
@@ -586,7 +665,16 @@ public static class ProductionTick
                 switch (routed.Kind)
                 {
                     case SignalKind.Resource:
-                        next[toKey] = existing.AddResource(routed);
+                        // Continuous money: a single circulating value replaces, not piles.
+                        if (routed is SignalValue.Money)
+                        {
+                            next[toKey] = routed;
+                        }
+                        else
+                        {
+                            next[toKey] = existing.AddResource(routed);
+                        }
+
                         break;
                     case SignalKind.Information:
                         // Occupancy: destination still has stock — skip this edge's copy.
@@ -599,22 +687,6 @@ public static class ProductionTick
             else
             {
                 next[toKey] = routed;
-            }
-        }
-
-        if (treasuryDebits != 0)
-        {
-            var treasuryKey = new PortKey(
-                MagicAgencySeed.EnchantNodeId,
-                MagicAgencySeed.MoneyPortId);
-            if (next.TryGetValue(treasuryKey, out var stock) && stock is SignalValue.Money money)
-            {
-                next[treasuryKey] = money.WithAmount(money.Amount - treasuryDebits);
-            }
-            else if (treasuryDebits > 0)
-            {
-                throw new InvalidOperationException(
-                    "Treasury debit requires money stock on enchant.money.");
             }
         }
 

@@ -10,7 +10,6 @@ public sealed record EnchantNodeConfig(
 
 /// <summary>Numeric parameters for the sell node type (loaded from JSON).</summary>
 public sealed record SellNodeConfig(
-    double Cost,
     double Effort,
     double PayoutFloor);
 

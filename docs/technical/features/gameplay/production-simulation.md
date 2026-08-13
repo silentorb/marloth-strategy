@@ -51,7 +51,7 @@ Port signals are keyed by `(NodeId, PortId)`. Node progress is keyed by `NodeId`
 
 | Kind | Payload | Route / merge |
 |------|---------|---------------|
-| **Resource** | Scalar quantity (`Money`) | **Add** into destination stocks; consume by subtracting |
+| **Resource (money)** | Scalar quantity (`Money`) | Continuous circulating value: nodes forward it; routing **sets** the destination (does not stack additive piles). Costs subtract from the value; sell may increment by payout |
 | **Information** | Single structure (`Enchantment`) | **Copy** along each outgoing edge; **set** on destination when empty. Mutate only inside node logic |
 
 Residuals are applied first. A routed information copy applies only if the destination is **empty** after residuals; if occupied, that edge’s copy is **skipped** (occupancy). Two routed information writes into an empty port are exceptional (fail-fast).
@@ -74,11 +74,11 @@ Each node carries runtime `progress` (`double`, default `0`).
 Node configs include:
 
 - **`effort`** — work units per application (seed default `10`)
-- **`cost`** — treasury money charged per successful application (seed default `20`)
+- **`cost`** (enchant only) — deducted from the continuous money value per successful mutation (seed default `20`)
 
-While `progress >= config.effort` and treasury can pay `cost`, applications run; each subtracts `config.effort` from progress and records a treasury debit.
+While `progress >= config.effort` and (for enchant) money can pay `cost`, applications run; each subtracts `config.effort` from progress; enchant also deducts `cost` from money.
 
-Treasury debits are collected during compute and applied in commit to `enchant.money` (order-independent). Sell still emits full payout on its money output; net treasury change is `+payout - cost`. Insufficient treasury skips that application (progress unchanged for that attempt).
+Money is exclusively port I/O. The circulating value starts from committed money on the cycle (enchant’s money input when present, else sell’s). Same-tick: enchant emits money after its costs, then sell pass-throughs or **increments by payout**. Edges `enchant.money → sell.money` and `sell.money → enchant.money` commit the results. Insufficient money for enchant costs skips that application (progress unchanged for that attempt).
 
 ## Node behaviors
 
@@ -86,17 +86,19 @@ Tunable numerics live in `config/node-types/{enchant,sell}.json` (heterogeneous 
 
 ### `enchant`
 
-- Inputs: `enchantment` (processed), `money` (treasury; charged `cost` per mutation).
-- Output: `enchantment`.
+- Inputs: `enchantment`, `money`.
+- Outputs: `enchantment`, `money`.
 - Stat: `enchanting` (default `1`).
-- With assignment effort `> 0` and an input enchantment: add progress; run mutate applications while affordable; **consume** input and **emit** either the mutated result or a **pass-through** copy of the input. Fan-out copies the emitted value only.
+- With assignment effort `> 0` and an input enchantment: add progress; run mutate applications while affordable; **consume** input and **emit** either the mutated result or a **pass-through** copy of the input. Fan-out copies the emitted enchantment only.
 - Mutation formula: `volume + volumeDelta`, `darkness + darknessDelta`, `fallacy + darkness + fallacyConstant` (defaults `10` / `1` / `1`).
+- Money: consume input and **emit** `money_in - granted * cost` on the money output (pass-through when `granted == 0`).
 
 ### `sell`
 
-- Input: `enchantment`; output: `money`.
+- Inputs: `enchantment`, `money`; output: `money`.
 - Stat: `sales` (default `1`).
-- Add progress from assignment; when `progress >= effort` and treasury can pay `cost`, consume enchantment, produce `Money(max(payoutFloor, volume - fallacy))`, charge `cost`. Otherwise residual input, no output.
+- Add progress from assignment; when `progress >= effort`, consume enchantment and **increment** money by `max(payoutFloor, volume - fallacy)`. Otherwise leave enchantment residual and **return** money unchanged (pass-through).
+- Emits money on its money output for routing back to enchant. No money cost.
 
 ## Tick pipeline
 
@@ -108,14 +110,14 @@ ProductionTickResult AdvanceTickWithReport(GameState state);
 // AdvanceTick(state) => AdvanceTickWithReport(state).State;
 ```
 
-`ProductionTickResult` carries the next `GameState` plus `ImmutableArray<NodeIoRow> Nodes` (one row per node, same order as tick iteration). Each `NodeIoRow` reports the **primary** process ports (enchantment in/out for `enchant` and `sell`; money out for `sell`) with typed `SignalValue` available / residual / produced fields and whether the primary input was consumed.
+`ProductionTickResult` carries the next `GameState` plus `ImmutableArray<NodeIoRow> Nodes` (one row per node, same order as tick iteration). Each `NodeIoRow` reports the **primary** process ports (enchantment in/out for `enchant` and `sell`; money out for `sell`) with typed `SignalValue` available / residual / produced fields, whether the primary input was consumed, and **`MoneyIn` / `MoneyOut`** for that node’s continuous money transform this tick (enchant: start→after cost; sell: after enchant→after sell pass-through or increment).
 
 Pipeline (each step returns new data; no mutation of prior state):
 
 1. **`ResolveInputs`** — For each action input port, take the value already committed on that port.
 2. **`ResolveEffectiveAssignments` / assignment effort** — Filter preferred assignments by prerequisites; split capacity.
-3. **`ComputeOutputs`** — Node-type-specific behavior using inputs, assignment effort, stats, progress, and cost. Collect treasury debits and next progress. Node iteration order must not change results.
-4. **`CommitSignals`** — Residuals; route outputs (resource add; information set if empty / skip if occupied); apply treasury debits to `enchant.money`.
+3. **`ComputeOutputs`** — Node-type-specific behavior using each node’s port inputs, assignment effort, stats, progress, and cost. Same-tick money chain (enchant then sell). Node iteration order must not change results.
+4. **`CommitSignals`** — Residuals; route outputs (money **set**; information set if empty / skip if occupied).
 5. **`NextState`** — New signals, updated progress map, `Tick + 1`.
 
 Host pattern:
@@ -130,11 +132,11 @@ state = AdvanceTick(state); // mutable binding, immutable values
 
 Factory: `MagicAgencySeed.CreateInitialState()` (loads node configs and actors from `config/` under the app base directory; overloads accept explicit configs/actors).
 
-- Node types: `enchant` (in `enchantment` + `money`, out `enchantment`), `sell` (in `enchantment`, out `money`).
+- Node types: `enchant` (in/out `enchantment` + `money`), `sell` (in `enchantment` + `money`, out `money`).
 - Nodes: `enchant`, `sell`.
-- Edges: `enchant.enchantment` → `enchant.enchantment`; `enchant.enchantment` → `sell.enchantment`; `sell.money` → `enchant.money`.
+- Edges: `enchant.enchantment` → `enchant.enchantment`; `enchant.enchantment` → `sell.enchantment`; `enchant.money` → `sell.money`; `sell.money` → `enchant.money`.
 - Actor `intern` from JSON (capacity `1.0`, stats as configured), preferred assignments to both nodes.
-- Initial signals: `enchant.enchantment = (0,0,0)`, `enchant.money = 100`; progress empty/`0`; `Tick = 0`.
+- Initial signals (port priming): `enchant.enchantment = (0,0,0)`, `enchant.money = 100`; progress empty/`0`; `Tick = 0`.
 
 ## Layout
 

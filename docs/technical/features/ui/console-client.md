@@ -15,7 +15,7 @@
 - App constructs `GameConfig` and calls `ConsoleClient.Run(config)`.
 - Prefer a **single abort boundary** at process entry for fatal/unrecoverable errors ([error handling](../platform/error-handling.md)); do not scatter catches in Client.
 - Client seeds with `MagicAgencySeed.CreateInitialState()`, prints a tick-0 state snapshot, then loops until quit/EOF ([console loop](../../../game/features/session/console-loop.md)).
-- On Enter: capture prior state, `var result = ProductionTick.AdvanceTickWithReport(state); state = result.State;` then print `FormatStateSnapshot(state, previous)`.
+- On Enter: capture prior state, `var result = ProductionTick.AdvanceTickWithReport(state); state = result.State;` then print `FormatStateSnapshot(state, previous, result)` so money lines use that tick’s in→out transforms.
 - Interactive input uses `Console.ReadKey(intercept: true)` so **Enter** and **`q`/`Q`** are single keypresses. When `Console.IsInputRedirected`, fall back to `ReadLine` (empty line / `q`) for agent piped smoke.
 - Invalid prompt input reprints a short hint and re-prompts. Expected player mistakes are not exceptions.
 
@@ -40,11 +40,11 @@ Rules:
 |------|--------|
 | Heading | `## Tick {N}` then a blank line |
 | Nodes | One block per graph node, ordered by node id; blank line between node blocks |
-| Ports | Union of the node type’s input and output ports (ordinal by port id), then `progress` |
-| Money (resource) | Scalar amount; missing stock displays as `0` (never `-`); numerics **rounded** to nearest integer |
-| Enchantment (information) | Nested `volume` / `darkness` / `fallacy` when present; absent displays as `-`; same rounding |
+| Ports | Union of the node type’s input and output ports (ordinal by port id), then `progress`. Same-named input/output ports share one committed `PortSignals` stock and one display entry |
+| Money (resource) | After a tick, show the node’s money **transform** for that tick (`in → out` when different; bare value when unchanged/pass-through). Tick 0 shows committed stock only. Missing stock displays as `0`; numerics **rounded** to nearest integer |
+| Enchantment (information) | Nested `volume` / `darkness` / `fallacy` when present; absent displays as `0`; same rounding; change arrows from prior committed stock |
 | Progress | Rounded numeric from `NodeProgress` (default `0`) |
-| Change annotations | When a previous state is supplied, compare rounded display strings per leaf; if different, print `previous → current` (U+2192); if equal, print current only. Tick 0 has no previous state (no arrows). |
+| Change annotations | Enchantment/progress: when a previous state is supplied, compare rounded display strings per leaf; if different, print `previous → current` (U+2192); if equal, print current only. Money uses the tick transform (see above). Tick 0 has no previous state (no arrows). Empty leaves use `0` (never `-`) |
 
 `AdvanceTickWithReport` still returns per-node I/O rows for Simulation consumers; the console Client does not print that table.
 

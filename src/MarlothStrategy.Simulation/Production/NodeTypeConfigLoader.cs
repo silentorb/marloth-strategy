@@ -35,7 +35,7 @@ public static class NodeTypeConfigLoader
 
         var sell = ReadRequired<SellNodeConfigDto, SellNodeConfig>(
             Path.Combine(directory, "sell.json"),
-            dto => new SellNodeConfig(dto.Cost, dto.Effort, dto.PayoutFloor));
+            dto => new SellNodeConfig(dto.Effort, dto.PayoutFloor));
 
         return new NodeTypeConfigs(enchant, sell);
     }
@@ -87,9 +87,6 @@ public static class NodeTypeConfigLoader
 
     private sealed class SellNodeConfigDto
     {
-        [JsonRequired]
-        public double Cost { get; init; }
-
         [JsonRequired]
         public double Effort { get; init; }
 

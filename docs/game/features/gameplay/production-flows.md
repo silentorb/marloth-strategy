@@ -19,10 +19,10 @@ The first domain is a **magic agency** that creates enchantments as a service.
 
 | Kind | Behavior | Example |
 |------|----------|---------|
-| **Resource** | Primitive scalar; **added** and **subtracted** when routed or consumed | **money** (quantity) |
+| **Resource** | Primitive scalar. **Money** is a continuous circulating value: nodes forward it (pass-through or increment); routing **sets** the destination rather than stacking additive piles | **money** (quantity) |
 | **Information** | Complex structure; **copied** on route and **mutated** only inside node logic | **enchantment** (single value with `volume`, `darkness`, `fallacy`) |
 
-- Money signals carry a quantity of money. Enchantment signals carry a **single** enchantment (not a count).
+- Money signals carry a quantity of money that flows through the graph. Enchantment signals carry a **single** enchantment (not a count).
 - Actions consume input signals and produce output signals each production tick according to their node rules.
 - Routing and fan-out only **copy** emitted values; they never mutate information.
 
@@ -39,15 +39,15 @@ Do not use “man/manning” in product language; use **assignment** / **assigne
 ## Progress, work effort, and cost
 
 - Each action tracks runtime **progress** (carried across ticks).
-- Node config **`effort`** is the work units required per application (mutation or sale). Config **`cost`** is money charged from the agency treasury per successful application.
-- While `progress >= effort` and the treasury can pay `cost`, the action may apply one or more times in a tick; each application subtracts `effort` from progress and charges `cost`.
-- **`enchant`:** with assignment effort and an input enchantment, the node always forwards the enchantment to its output—either **mutate** (one or more paid applications) or **pass-through** (emit the same value unchanged). Progress may still rise on a pass-through tick.
-- **`sell`:** when progress and treasury allow, consume the enchantment and produce money; otherwise leave the input as residual (no information pass-through).
+- Node config **`effort`** is the work units required per application (mutation or sale). Config **`cost`** (enchant only) is deducted from the continuous money value per successful mutation.
+- While `progress >= effort` and (for enchant) money can pay `cost`, the action may apply one or more times in a tick; each application subtracts `effort` from progress; enchant also deducts `cost` from money.
+- **`enchant`:** with assignment effort and an input enchantment, the node always forwards the enchantment to its output—either **mutate** (one or more paid applications) or **pass-through** (emit the same value unchanged). Progress may still rise on a pass-through tick. Enchant also forwards **money** on its money ports (minus `cost` per mutation).
+- **`sell`:** receives money on its money input and either **returns it unchanged** or **increments** it by the sale payout when a sale completes. When progress allows, consume the enchantment; otherwise leave the enchantment as residual (no information pass-through).
 
 ## Circular flows and ticks
 
 - Production updates run in discrete **ticks**. For now, one player turn advances one production tick.
-- To avoid resolution-order races on cycles, every action computes outputs from **inputs committed on the previous tick** (buffered signals). Same-tick outputs are not visible to other actions until the next tick.
+- Enchantment uses **buffered** cross-tick signals (outputs visible next tick). The money cycle is resolved **same-tick** along `enchant → sell` so both nodes transform one continuous value without a node-id treasury.
 - Information ports hold a single value. If a consumer still has stock after residuals, a routed copy to that port is **skipped** that commit (occupancy).
 
 ## Magic agency seed (initial configuration)
@@ -55,16 +55,16 @@ Do not use “man/manning” in product language; use **assignment** / **assigne
 | Piece | Detail |
 |-------|--------|
 | Actors | One actor (`intern`), capacity `1.0`, stats `enchanting: 10`, `sales: 10` (from `config/actors/intern.json`) |
-| Actions | `enchant` — mutate or pass-through an enchantment; `sell` — consume an enchantment, produce money |
+| Actions | `enchant` — mutate or pass-through enchantment; forward money; `sell` — consume enchantment; pass-through or increment money |
 | Enchant formula | On each mutation: `volume + volumeDelta`, `darkness + darknessDelta`, `fallacy + darkness + fallacyConstant` (defaults `10` / `1` / `1`) |
-| Sell formula | money = `max(payoutFloor, volume - fallacy)` (default `payoutFloor=0`) |
-| Graph | Enchantment **fans out**: copy `enchant` → `enchant` (feedback) and copy `enchant` → `sell`; money flows `sell` → `enchant` (treasury) |
+| Sell formula | payout increment = `max(payoutFloor, volume - fallacy)` (default `payoutFloor=0`) |
+| Graph | Enchantment **fans out**: copy `enchant` → `enchant` (feedback) and copy `enchant` → `sell`; money cycle: `enchant.money` → `sell.money` and `sell.money` → `enchant.money` |
 | Assignment | Preferred: `intern` → both actions; effective set drops nodes without an enchantment input |
-| Work / cost | Config `effort: 10`, `cost: 20` per type; progress gain uses actor stats × assignment effort |
+| Work / cost | Config `effort: 10` per type; enchant `cost: 20` (sell has no cost); progress gain uses actor stats × assignment effort |
 | Config | Node numerics in `config/node-types/{enchant,sell}.json`; actors in `config/actors/*.json`; port layouts and seed wiring stay in code |
-| Starting stocks | `enchant` enchantment = `(volume:0, darkness:0, fallacy:0)`; `enchant` money = `100`; `sell` enchantment empty; node progress `0` |
+| Starting stocks | Seed primes ports: `enchant` enchantment = `(volume:0, darkness:0, fallacy:0)`; `enchant` money = `100`; `sell` ports empty; node progress `0` |
 
-Expected early behavior: first tick sell has no input so `intern` assigns only to `enchant` (assignment effort `1.0`); progress gains `10`, one mutation runs (`(0,0,0)` → `(10,1,1)`), treasury pays `cost` → money `80`, copies fan out to `enchant` and `sell`. Later ticks split effort when both have inputs; sell completes when its progress and treasury allow. Signal values are floating-point; the console rounds them for display.
+Expected early behavior: first tick sell has no enchantment so `intern` assigns only to `enchant` (assignment effort `1.0`); progress gains `10`, one mutation runs (`(0,0,0)` → `(10,1,1)`), money deducts `cost` → `80`; enchant and sell both emit that money onto the cycle so both money ports show `80`; enchantment copies fan out to `enchant` and `sell`. Later ticks split effort when both have enchantment inputs; sell completes when its progress and money allow, incrementing the circulating money by the payout. Signal values are floating-point; the console rounds them for display.
 
 ## Related docs
 

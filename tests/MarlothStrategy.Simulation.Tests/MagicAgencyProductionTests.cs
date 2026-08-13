@@ -13,7 +13,7 @@ public sealed class MagicAgencyProductionTests
             VolumeDelta: 10,
             DarknessDelta: 1,
             FallacyConstant: 1),
-        new SellNodeConfig(Cost: 20, Effort: 10, PayoutFloor: 0));
+        new SellNodeConfig(Effort: 10, PayoutFloor: 0));
 
     private static readonly ImmutableDictionary<ActorId, Actor> DefaultActors =
         ImmutableDictionary<ActorId, Actor>.Empty.Add(
@@ -29,7 +29,7 @@ public sealed class MagicAgencyProductionTests
         MagicAgencySeed.CreateInitialState(configs ?? DefaultConfigs, DefaultActors);
 
     [Fact]
-    public void Seed_HasFanOutEnchantmentEdgesMoneyTreasuryAndDualAssignment()
+    public void Seed_HasFanOutEnchantmentEdgesMoneyLoopAndDualAssignment()
     {
         var state = Seed();
 
@@ -44,7 +44,7 @@ public sealed class MagicAgencyProductionTests
         Assert.True(state.Graph.Nodes.ContainsKey(MagicAgencySeed.EnchantNodeId));
         Assert.True(state.Graph.Nodes.ContainsKey(MagicAgencySeed.SellNodeId));
 
-        Assert.Equal(3, state.Graph.Edges.Count);
+        Assert.Equal(4, state.Graph.Edges.Count);
         Assert.Contains(
             state.Graph.Edges.Values,
             e => e.From.Node == MagicAgencySeed.EnchantNodeId
@@ -59,10 +59,20 @@ public sealed class MagicAgencyProductionTests
                  && e.To.Port == MagicAgencySeed.EnchantmentPortId);
         Assert.Contains(
             state.Graph.Edges.Values,
+            e => e.From.Node == MagicAgencySeed.EnchantNodeId
+                 && e.From.Port == MagicAgencySeed.MoneyPortId
+                 && e.To.Node == MagicAgencySeed.SellNodeId
+                 && e.To.Port == MagicAgencySeed.MoneyPortId);
+        Assert.Contains(
+            state.Graph.Edges.Values,
             e => e.From.Node == MagicAgencySeed.SellNodeId
                  && e.From.Port == MagicAgencySeed.MoneyPortId
                  && e.To.Node == MagicAgencySeed.EnchantNodeId
                  && e.To.Port == MagicAgencySeed.MoneyPortId);
+
+        var enchantType = state.Catalog.Get(MagicAgencySeed.EnchantTypeId);
+        Assert.True(enchantType.Outputs.ContainsKey(MagicAgencySeed.MoneyPortId));
+        Assert.True(enchantType.Outputs.ContainsKey(MagicAgencySeed.EnchantmentPortId));
 
         Assert.Equal(2, state.Assignments.Length);
         Assert.Contains(
@@ -81,6 +91,9 @@ public sealed class MagicAgencyProductionTests
         Assert.False(
             state.PortSignals.ContainsKey(
                 new PortKey(MagicAgencySeed.SellNodeId, MagicAgencySeed.EnchantmentPortId)));
+        Assert.False(
+            state.PortSignals.ContainsKey(
+                new PortKey(MagicAgencySeed.SellNodeId, MagicAgencySeed.MoneyPortId)));
         Assert.Equal(DefaultConfigs, state.NodeConfigs);
         Assert.Empty(state.NodeProgress);
     }
@@ -112,6 +125,9 @@ public sealed class MagicAgencyProductionTests
         Assert.Equal(
             new SignalValue.Money(80),
             Signal(next, MagicAgencySeed.EnchantNodeId, MagicAgencySeed.MoneyPortId));
+        Assert.Equal(
+            new SignalValue.Money(80),
+            Signal(next, MagicAgencySeed.SellNodeId, MagicAgencySeed.MoneyPortId));
         Assert.Equal(0, next.NodeProgress.GetValueOrDefault(MagicAgencySeed.EnchantNodeId));
 
         var enchant = Row(result, MagicAgencySeed.EnchantNodeId);
@@ -125,7 +141,11 @@ public sealed class MagicAgencyProductionTests
         Assert.Equal(0m, sell.Effort);
         Assert.Null(sell.Available);
         Assert.False(sell.Consumed);
-        Assert.Null(sell.Produced);
+        Assert.Equal(new SignalValue.Money(80), sell.Produced);
+        Assert.Equal(100, Row(result, MagicAgencySeed.EnchantNodeId).MoneyIn);
+        Assert.Equal(80, Row(result, MagicAgencySeed.EnchantNodeId).MoneyOut);
+        Assert.Equal(80, sell.MoneyIn);
+        Assert.Equal(80, sell.MoneyOut);
     }
 
     [Fact]
@@ -146,6 +166,9 @@ public sealed class MagicAgencyProductionTests
         Assert.Equal(
             new SignalValue.Money(80),
             Signal(afterTwo, MagicAgencySeed.EnchantNodeId, MagicAgencySeed.MoneyPortId));
+        Assert.Equal(
+            new SignalValue.Money(80),
+            Signal(afterTwo, MagicAgencySeed.SellNodeId, MagicAgencySeed.MoneyPortId));
         Assert.Equal(5, afterTwo.NodeProgress[MagicAgencySeed.EnchantNodeId]);
         Assert.Equal(5, afterTwo.NodeProgress[MagicAgencySeed.SellNodeId]);
 
@@ -158,10 +181,11 @@ public sealed class MagicAgencyProductionTests
         Assert.Equal(0.5m, sell.Effort);
         Assert.False(sell.Consumed);
         Assert.Equal(new SignalValue.Enchantment(10, 1, 1), sell.Residual);
+        Assert.Equal(new SignalValue.Money(80), sell.Produced);
     }
 
     [Fact]
-    public void ThirdTick_EnchantMutatesAgain_SellPaysAndChargesCost()
+    public void ThirdTick_EnchantMutatesAgain_SellIncrementsPayout()
     {
         var state = Seed();
         var afterTwo = ProductionTick.AdvanceTick(ProductionTick.AdvanceTick(state));
@@ -175,14 +199,21 @@ public sealed class MagicAgencyProductionTests
         Assert.Equal(
             new SignalValue.Enchantment(20, 2, 3),
             Signal(afterThree, MagicAgencySeed.SellNodeId, MagicAgencySeed.EnchantmentPortId));
-        // treasury 80 - 20 (enchant) - 20 (sell) + 9 (payout) = 49
-        Assert.Equal(
-            new SignalValue.Money(49),
-            Signal(afterThree, MagicAgencySeed.EnchantNodeId, MagicAgencySeed.MoneyPortId));
 
         var sell = Row(result, MagicAgencySeed.SellNodeId);
         Assert.True(sell.Consumed);
-        Assert.Equal(new SignalValue.Money(9), sell.Produced);
+        Assert.Equal(new SignalValue.Money(69), sell.Produced);
+        // Sell increments by payout only: 60 + 9 = 69 (enchant already took 20)
+        Assert.Equal(60, sell.MoneyIn);
+        Assert.Equal(69, sell.MoneyOut);
+
+        // money 80 - 20 (enchant) + 9 (payout) = 69
+        Assert.Equal(
+            new SignalValue.Money(69),
+            Signal(afterThree, MagicAgencySeed.EnchantNodeId, MagicAgencySeed.MoneyPortId));
+        Assert.Equal(
+            new SignalValue.Money(69),
+            Signal(afterThree, MagicAgencySeed.SellNodeId, MagicAgencySeed.MoneyPortId));
         Assert.Equal(0, afterThree.NodeProgress[MagicAgencySeed.EnchantNodeId]);
         Assert.Equal(0, afterThree.NodeProgress[MagicAgencySeed.SellNodeId]);
     }
@@ -247,7 +278,6 @@ public sealed class MagicAgencyProductionTests
         Assert.Equal(10, loaded.Enchant.VolumeDelta);
         Assert.Equal(1, loaded.Enchant.DarknessDelta);
         Assert.Equal(1, loaded.Enchant.FallacyConstant);
-        Assert.Equal(20, loaded.Sell.Cost);
         Assert.Equal(10, loaded.Sell.Effort);
         Assert.Equal(0, loaded.Sell.PayoutFloor);
     }
@@ -301,11 +331,14 @@ public sealed class MagicAgencyProductionTests
         Assert.Equal(
             new SignalValue.Money(40),
             Signal(next, MagicAgencySeed.EnchantNodeId, MagicAgencySeed.MoneyPortId));
+        Assert.Equal(
+            new SignalValue.Money(40),
+            Signal(next, MagicAgencySeed.SellNodeId, MagicAgencySeed.MoneyPortId));
         Assert.Equal(0, next.NodeProgress.GetValueOrDefault(MagicAgencySeed.EnchantNodeId));
     }
 
     [Fact]
-    public void InsufficientTreasury_SkipsApplicationWithoutConsumingProgress()
+    public void InsufficientMoney_SkipsApplicationWithoutConsumingProgress()
     {
         var configs = new NodeTypeConfigs(
             new EnchantNodeConfig(
@@ -326,6 +359,9 @@ public sealed class MagicAgencyProductionTests
         Assert.Equal(
             new SignalValue.Money(100),
             Signal(next, MagicAgencySeed.EnchantNodeId, MagicAgencySeed.MoneyPortId));
+        Assert.Equal(
+            new SignalValue.Money(100),
+            Signal(next, MagicAgencySeed.SellNodeId, MagicAgencySeed.MoneyPortId));
         Assert.Equal(10, next.NodeProgress[MagicAgencySeed.EnchantNodeId]);
 
         var enchant = Row(result, MagicAgencySeed.EnchantNodeId);
@@ -358,7 +394,7 @@ public sealed class MagicAgencyProductionTests
                 VolumeDelta: 5,
                 DarknessDelta: 2,
                 FallacyConstant: 0),
-            new SellNodeConfig(Cost: 0, Effort: 10, PayoutFloor: 3));
+            new SellNodeConfig(Effort: 10, PayoutFloor: 3));
 
         var state = Seed(configs);
         // tick1: mutate to (5,2,0); tick2: pass-through + sell progress 5; tick3: mutate (10,4,2) + sell (5,2,0)→5
@@ -371,6 +407,9 @@ public sealed class MagicAgencyProductionTests
         Assert.Equal(
             new SignalValue.Money(105),
             Signal(afterThree, MagicAgencySeed.EnchantNodeId, MagicAgencySeed.MoneyPortId));
+        Assert.Equal(
+            new SignalValue.Money(105),
+            Signal(afterThree, MagicAgencySeed.SellNodeId, MagicAgencySeed.MoneyPortId));
     }
 
     private static SignalValue Signal(GameState state, NodeId node, PortId port) =>
