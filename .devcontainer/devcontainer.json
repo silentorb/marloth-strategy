@@ -9,9 +9,6 @@
             "dotnetRuntimeVersions": "8.0"
         }
     },
-    "mounts": [
-        "source=${localEnv:HOME}/dev/minimap,target=/workspaces/minimap,type=bind,consistency=cached"
-    ],
     "customizations": {
         "vscode": {
             "extensions": [],
