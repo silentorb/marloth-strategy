@@ -5,15 +5,27 @@ namespace MarlothStrategy.Simulation.Production;
 
 /// <summary>
 /// Builds the magic-agency node catalog and graph from the essential baseline
-/// (including an enchant self-loop), optionally adding the testing variation
-/// that fans testing output back onto enchant alongside that self-loop.
+/// (including an enchant self-loop), optionally adding the testing or design
+/// variation. Testing and design are mutually exclusive.
 /// </summary>
 public static class GraphFactory
 {
-    public static (NodeGraph Graph, NodeTypeCatalog Catalog) Create(bool includeTesting)
+    public static (NodeGraph Graph, NodeTypeCatalog Catalog) Create(
+        bool includeTesting = false,
+        bool includeDesign = false)
     {
+        if (includeTesting && includeDesign)
+        {
+            throw new InvalidOperationException(
+                "Testing and Design variations are mutually exclusive.");
+        }
+
         var catalog = CreateCatalog();
-        var graph = includeTesting ? CreateTestingGraph() : CreateEssentialGraph();
+        var graph = includeDesign
+            ? CreateDesignGraph()
+            : includeTesting
+                ? CreateTestingGraph()
+                : CreateEssentialGraph();
         return (graph, catalog);
     }
 
@@ -21,13 +33,21 @@ public static class GraphFactory
     {
         var moneyType = new SignalType(SignalTypes.Money);
         var enchantmentType = new SignalType(SignalTypes.Enchantment);
+        var designsType = new SignalType(SignalTypes.Designs);
 
         var enchantType = new NodeType(
             MagicAgencySeed.EnchantTypeId,
             ImmutableDictionary<PortId, Port>.Empty
-                .Add(MagicAgencySeed.EnchantmentPortId, new Port(MagicAgencySeed.EnchantmentPortId, enchantmentType)),
+                .Add(MagicAgencySeed.EnchantmentPortId, new Port(MagicAgencySeed.EnchantmentPortId, enchantmentType))
+                .Add(MagicAgencySeed.DesignsPortId, new Port(MagicAgencySeed.DesignsPortId, designsType)),
             ImmutableDictionary<PortId, Port>.Empty
                 .Add(MagicAgencySeed.EnchantmentPortId, new Port(MagicAgencySeed.EnchantmentPortId, enchantmentType)));
+
+        var designType = new NodeType(
+            MagicAgencySeed.DesignTypeId,
+            ImmutableDictionary<PortId, Port>.Empty,
+            ImmutableDictionary<PortId, Port>.Empty
+                .Add(MagicAgencySeed.DesignsPortId, new Port(MagicAgencySeed.DesignsPortId, designsType)));
 
         var testingType = new NodeType(
             MagicAgencySeed.TestingTypeId,
@@ -69,6 +89,7 @@ public static class GraphFactory
             ImmutableDictionary<NodeTypeId, NodeType>.Empty
                 .Add(MagicAgencySeed.EnchantTypeId, enchantType)
                 .Add(MagicAgencySeed.TestingTypeId, testingType)
+                .Add(MagicAgencySeed.DesignTypeId, designType)
                 .Add(MagicAgencySeed.SellTypeId, sellType)
                 .Add(MagicAgencySeed.TreasuryTypeId, treasuryType)
                 .Add(MagicAgencySeed.PayrollTypeId, payrollType)
@@ -153,6 +174,24 @@ public static class GraphFactory
                     new Edge(
                         new PortReference(MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId),
                         new PortReference(MagicAgencySeed.PayrollNodeId, MagicAgencySeed.MoneyPortId))));
+    }
+
+    /// <summary>
+    /// Design variation: keep the essential enchantment and money spine, add a design
+    /// source feeding <c>enchant.designs</c>.
+    /// </summary>
+    public static NodeGraph CreateDesignGraph()
+    {
+        var essential = CreateEssentialGraph();
+        return new NodeGraph(
+            essential.Nodes.Add(
+                MagicAgencySeed.DesignNodeId,
+                new Node(MagicAgencySeed.DesignNodeId, MagicAgencySeed.DesignTypeId)),
+            essential.Edges.Add(
+                new EdgeId("designs-to-enchant"),
+                new Edge(
+                    new PortReference(MagicAgencySeed.DesignNodeId, MagicAgencySeed.DesignsPortId),
+                    new PortReference(MagicAgencySeed.EnchantNodeId, MagicAgencySeed.DesignsPortId))));
     }
 
     /// <summary>

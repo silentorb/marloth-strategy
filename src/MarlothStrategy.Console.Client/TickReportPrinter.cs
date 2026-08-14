@@ -70,6 +70,7 @@ public static class TickReportPrinter
     {
         null => "0",
         SignalValue.Money m => FormatRounded(m.Amount),
+        SignalValue.Designs d => FormatRounded(d.Amount),
         SignalValue.Enchantment e =>
             $"{e.Block.AbbreviatedHash} {FormatRounded(e.Volume)}/{FormatRounded(e.Darkness)}/{FormatRounded(e.Fallacy)}",
         _ => throw new InvalidOperationException($"Unknown signal value kind: {value.GetType().Name}."),
@@ -235,6 +236,7 @@ public static class TickReportPrinter
     private static bool ShowsProgress(NodeTypeId typeId) =>
         typeId == MagicAgencySeed.EnchantTypeId
         || typeId == MagicAgencySeed.TestingTypeId
+        || typeId == MagicAgencySeed.DesignTypeId
         || typeId == MagicAgencySeed.SellTypeId
         || typeId == MagicAgencySeed.TreasuryTypeId
         || typeId == MagicAgencySeed.PayrollTypeId
@@ -273,6 +275,11 @@ public static class TickReportPrinter
         if (typeId == MagicAgencySeed.MergeTypeId)
         {
             return configs.Merge.Effort;
+        }
+
+        if (typeId == MagicAgencySeed.DesignTypeId)
+        {
+            return configs.Design.Effort;
         }
 
         throw new InvalidOperationException($"No effort target for node type '{typeId.Value}'.");
@@ -359,8 +366,9 @@ public static class TickReportPrinter
     {
         null => "0",
         SignalValue.Money m => FormatRounded(m.Amount),
+        SignalValue.Designs d => FormatRounded(d.Amount),
         _ => throw new InvalidOperationException(
-            $"Expected resource money on port, got {value.GetType().Name}."),
+            $"Expected resource money or designs on port, got {value.GetType().Name}."),
     };
 
     private static string FormatChange(string prior, string current) =>
@@ -368,7 +376,7 @@ public static class TickReportPrinter
 
     private static SignalKind KindOf(SignalTypeId typeId)
     {
-        if (typeId == SignalTypes.Money)
+        if (typeId == SignalTypes.Money || typeId == SignalTypes.Designs)
         {
             return SignalKind.Resource;
         }

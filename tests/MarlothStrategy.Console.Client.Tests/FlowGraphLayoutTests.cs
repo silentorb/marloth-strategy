@@ -15,7 +15,8 @@ public sealed class FlowGraphLayoutTests
         new SellNodeConfig(Effort: 10, PayoutFloor: 0),
         new TreasuryNodeConfig(Effort: 1),
         new PayrollNodeConfig(DefaultWage: 10, Period: 5, Effort: 1),
-        new MergeNodeConfig(Effort: 1));
+        new MergeNodeConfig(Effort: 1),
+        new DesignNodeConfig(Effort: 3));
 
     private static readonly ImmutableDictionary<ActorId, Actor> DefaultActors =
         ImmutableDictionary<ActorId, Actor>.Empty
@@ -135,6 +136,30 @@ public sealed class FlowGraphLayoutTests
 
         Assert.True(layout.Nodes.Single(n => n.Id.Value == "enchant").HasSelfLoop);
         Assert.DoesNotContain(layout.Edges, e => e.From == e.To);
+        Assert.Contains(
+            layout.Edges,
+            e => e.From.Value == "enchant" && e.To.Value == "sell");
+    }
+
+    [Fact]
+    public void Compute_DesignGraph_RoutesDesignsOntoEnchant()
+    {
+        var spec = new ScenarioSpec(
+            IncludeTesting: false,
+            ImmutableArray.Create(MagicAgencySeed.ActorId),
+            ImmutableArray.Create(
+                new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.DesignNodeId)),
+            IncludeDesign: true);
+        var state = ScenarioBootstrap.Materialize(spec, DefaultConfigs, DefaultActors);
+        var layout = FlowGraphLayout.Compute(state);
+
+        Assert.Contains(layout.Nodes, n => n.Id.Value == "design");
+        Assert.Contains(
+            layout.Edges,
+            e => e.From.Value == "design"
+                 && e.FromPort.Value == "designs"
+                 && e.To.Value == "enchant"
+                 && e.ToPort.Value == "designs");
         Assert.Contains(
             layout.Edges,
             e => e.From.Value == "enchant" && e.To.Value == "sell");

@@ -1,5 +1,6 @@
 {
   "includeTesting": true,
+  "includeDesign": false,
   "actors": ["intern", "boss"],
   "assignments": [
     { "actorId": "intern", "nodeId": "enchant", "weight": 1 },

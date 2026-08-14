@@ -29,6 +29,9 @@ public sealed record PayrollNodeConfig(
 /// <summary>Numeric parameters for the merge node type (loaded from JSON).</summary>
 public sealed record MergeNodeConfig(double Effort);
 
+/// <summary>Numeric parameters for the design node type (loaded from JSON).</summary>
+public sealed record DesignNodeConfig(double Effort);
+
 /// <summary>Loaded per-type behavior numerics attached to <see cref="GameState"/>.</summary>
 public sealed record NodeTypeConfigs(
     EnchantNodeConfig Enchant,
@@ -36,7 +39,8 @@ public sealed record NodeTypeConfigs(
     SellNodeConfig Sell,
     TreasuryNodeConfig Treasury,
     PayrollNodeConfig Payroll,
-    MergeNodeConfig Merge);
+    MergeNodeConfig Merge,
+    DesignNodeConfig Design);
 
 /// <summary>Stat keys and defaults used when applying actor stats to nodes.</summary>
 public static class ActorStatKeys
@@ -47,6 +51,7 @@ public static class ActorStatKeys
     public const string Treasury = "treasury";
     public const string Payroll = "payroll";
     public const string Merging = "merging";
+    public const string Designing = "designing";
 
     public const double DefaultEnchanting = 1;
     public const double DefaultTesting = 1;
@@ -54,4 +59,5 @@ public static class ActorStatKeys
     public const double DefaultTreasury = 1;
     public const double DefaultPayroll = 1;
     public const double DefaultMerging = 1;
+    public const double DefaultDesigning = 1;
 }

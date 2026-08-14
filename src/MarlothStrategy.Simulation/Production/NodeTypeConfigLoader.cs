@@ -52,7 +52,11 @@ public static class NodeTypeConfigLoader
             Path.Combine(directory, "merge.json"),
             dto => new MergeNodeConfig(dto.Effort));
 
-        return new NodeTypeConfigs(enchant, testing, sell, treasury, payroll, merge);
+        var design = ReadRequired<DesignNodeConfigDto, DesignNodeConfig>(
+            Path.Combine(directory, "design.json"),
+            dto => new DesignNodeConfig(dto.Effort));
+
+        return new NodeTypeConfigs(enchant, testing, sell, treasury, payroll, merge, design);
     }
 
     private static TConfig ReadRequired<TDto, TConfig>(
@@ -134,6 +138,12 @@ public static class NodeTypeConfigLoader
     }
 
     private sealed class MergeNodeConfigDto
+    {
+        [JsonRequired]
+        public double Effort { get; init; }
+    }
+
+    private sealed class DesignNodeConfigDto
     {
         [JsonRequired]
         public double Effort { get; init; }

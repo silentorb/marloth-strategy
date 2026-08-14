@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using MarlothStrategy.Simulation;
+using MarlothStrategy.Simulation.Graph;
 using MarlothStrategy.Simulation.Production;
 
 namespace MarlothStrategy.Simulation.Tests;
@@ -16,7 +17,8 @@ public sealed class ScenarioTests
         new SellNodeConfig(Effort: 10, PayoutFloor: 0),
         new TreasuryNodeConfig(Effort: 1),
         new PayrollNodeConfig(DefaultWage: 10, Period: 5, Effort: 1),
-        new MergeNodeConfig(Effort: 1));
+        new MergeNodeConfig(Effort: 1),
+        new DesignNodeConfig(Effort: 3));
 
     private static readonly ActorId ConsultantId = new("consultant");
 
@@ -33,6 +35,7 @@ public sealed class ScenarioTests
         Assert.Equal(6, state.Graph.Edges.Count);
         Assert.True(state.Graph.Nodes.ContainsKey(MagicAgencySeed.TestingNodeId));
         Assert.False(state.Graph.Nodes.ContainsKey(MagicAgencySeed.MergeNodeId));
+        Assert.False(state.Graph.Nodes.ContainsKey(MagicAgencySeed.DesignNodeId));
         Assert.Contains(
             state.Graph.Edges.Values,
             e => e.From.Node == MagicAgencySeed.EnchantNodeId
@@ -98,6 +101,9 @@ public sealed class ScenarioTests
                  && e.To.Node == MagicAgencySeed.PayrollNodeId);
         Assert.True(catalog.Types.ContainsKey(MagicAgencySeed.TestingTypeId));
         Assert.True(catalog.Types.ContainsKey(MagicAgencySeed.MergeTypeId));
+        Assert.True(catalog.Types.ContainsKey(MagicAgencySeed.DesignTypeId));
+        Assert.True(
+            catalog.Get(MagicAgencySeed.EnchantTypeId).Inputs.ContainsKey(MagicAgencySeed.DesignsPortId));
     }
 
     [Fact]
@@ -126,6 +132,41 @@ public sealed class ScenarioTests
             e => e.From.Node == MagicAgencySeed.EnchantNodeId
                  && e.To.Node == MagicAgencySeed.SellNodeId);
         Assert.True(catalog.Types.ContainsKey(MagicAgencySeed.MergeTypeId));
+        Assert.False(graph.Nodes.ContainsKey(MagicAgencySeed.DesignNodeId));
+    }
+
+    [Fact]
+    public void GraphFactory_Design_KeepsEnchantSellSpineAndAddsDesignsEdge()
+    {
+        var (graph, catalog) = GraphFactory.Create(includeTesting: false, includeDesign: true);
+
+        Assert.Equal(5, graph.Nodes.Count);
+        Assert.Equal(5, graph.Edges.Count);
+        Assert.True(graph.Nodes.ContainsKey(MagicAgencySeed.DesignNodeId));
+        Assert.False(graph.Nodes.ContainsKey(MagicAgencySeed.TestingNodeId));
+        Assert.Contains(
+            graph.Edges.Values,
+            e => e.From.Node == MagicAgencySeed.EnchantNodeId
+                 && e.To.Node == MagicAgencySeed.EnchantNodeId);
+        Assert.Contains(
+            graph.Edges.Values,
+            e => e.From.Node == MagicAgencySeed.EnchantNodeId
+                 && e.To.Node == MagicAgencySeed.SellNodeId);
+        Assert.Contains(
+            graph.Edges.Values,
+            e => e.From.Node == MagicAgencySeed.DesignNodeId
+                 && e.From.Port == MagicAgencySeed.DesignsPortId
+                 && e.To.Node == MagicAgencySeed.EnchantNodeId
+                 && e.To.Port == MagicAgencySeed.DesignsPortId);
+        Assert.True(catalog.Types.ContainsKey(MagicAgencySeed.DesignTypeId));
+    }
+
+    [Fact]
+    public void GraphFactory_TestingAndDesignTogether_FailsFast()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => GraphFactory.Create(includeTesting: true, includeDesign: true));
+        Assert.Contains("mutually exclusive", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -150,6 +191,8 @@ public sealed class ScenarioTests
         var second = ScenarioGenerator.Generate(42, pool);
 
         Assert.Equal(first.IncludeTesting, second.IncludeTesting);
+        Assert.Equal(first.IncludeDesign, second.IncludeDesign);
+        Assert.False(first.IncludeTesting && first.IncludeDesign);
         Assert.Equal(first.ActorIds.ToArray(), second.ActorIds.ToArray());
         Assert.Equal(first.Assignments.ToArray(), second.Assignments.ToArray());
         Assert.InRange(first.ActorIds.Length, 2, 4);
@@ -235,6 +278,36 @@ public sealed class ScenarioTests
     }
 
     [Fact]
+    public void Generator_ChoosesNoneTestingOrDesignEquallyExclusive()
+    {
+        var pool = ActorPoolLoader.LoadFromBaseDirectory();
+        var none = 0;
+        var testing = 0;
+        var design = 0;
+        for (var seed = 0; seed < 96; seed++)
+        {
+            var spec = ScenarioGenerator.Generate(seed, pool);
+            Assert.False(spec.IncludeTesting && spec.IncludeDesign);
+            if (spec.IncludeTesting)
+            {
+                testing++;
+            }
+            else if (spec.IncludeDesign)
+            {
+                design++;
+            }
+            else
+            {
+                none++;
+            }
+        }
+
+        Assert.True(none > 0);
+        Assert.True(testing > 0);
+        Assert.True(design > 0);
+    }
+
+    [Fact]
     public void Bootstrap_UnsetPreset_UsesGenerator()
     {
         var actors = ActorConfigLoader.LoadFromBaseDirectory();
@@ -244,6 +317,7 @@ public sealed class ScenarioTests
         var spec = ScenarioGenerator.Generate(7, pool);
 
         Assert.Equal(spec.IncludeTesting, state.Graph.Nodes.ContainsKey(MagicAgencySeed.TestingNodeId));
+        Assert.Equal(spec.IncludeDesign, state.Graph.Nodes.ContainsKey(MagicAgencySeed.DesignNodeId));
         Assert.Equal(spec.ActorIds.Length, state.Actors.Count);
         Assert.Equal(spec.Assignments.ToArray(), state.Assignments.ToArray());
         Assert.DoesNotContain(ConsultantId, state.Actors.Keys);
@@ -315,6 +389,26 @@ public sealed class ScenarioTests
     }
 
     [Fact]
+    public void Materialize_TestingAndDesignTogether_FailsFast()
+    {
+        var actors = ImmutableDictionary<ActorId, Actor>.Empty.Add(
+            MagicAgencySeed.ActorId,
+            new Actor(
+                MagicAgencySeed.ActorId,
+                Capacity: 1.0m,
+                ImmutableDictionary<string, double>.Empty));
+        var spec = new ScenarioSpec(
+            IncludeTesting: true,
+            ImmutableArray.Create(MagicAgencySeed.ActorId),
+            ImmutableArray.Create(new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.EnchantNodeId)),
+            IncludeDesign: true);
+
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => ScenarioBootstrap.Materialize(spec, DefaultConfigs, actors));
+        Assert.Contains("both testing and design", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void ActorPoolLoader_UnknownId_FailsFast()
     {
         var directory = Path.Combine(Path.GetTempPath(), $"marloth-pool-{Guid.NewGuid():N}");
@@ -343,7 +437,7 @@ public sealed class ScenarioTests
 
     private static void AssertEveryNodeCovered(ScenarioSpec spec)
     {
-        var (graph, _) = GraphFactory.Create(spec.IncludeTesting);
+        var (graph, _) = GraphFactory.Create(spec.IncludeTesting, spec.IncludeDesign);
         Assert.All(
             graph.Nodes.Keys,
             nodeId => Assert.Contains(spec.Assignments, a => a.NodeId == nodeId));
@@ -351,6 +445,7 @@ public sealed class ScenarioTests
 
     private static bool SpecsEqual(ScenarioSpec a, ScenarioSpec b) =>
         a.IncludeTesting == b.IncludeTesting
+        && a.IncludeDesign == b.IncludeDesign
         && a.ActorIds.SequenceEqual(b.ActorIds)
         && a.Assignments.SequenceEqual(b.Assignments);
 }

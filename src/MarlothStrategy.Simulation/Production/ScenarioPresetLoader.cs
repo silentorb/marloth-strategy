@@ -131,13 +131,26 @@ public static class ScenarioPresetLoader
             assignments.Add(new Assignment(new ActorId(row.ActorId), new NodeId(row.NodeId), row.Weight));
         }
 
-        return new ScenarioSpec(dto.IncludeTesting, actorIds.ToImmutable(), assignments.ToImmutable());
+        if (dto.IncludeTesting && dto.IncludeDesign)
+        {
+            throw new InvalidOperationException(
+                $"Scenario preset '{path}' cannot include both testing and design.");
+        }
+
+        return new ScenarioSpec(
+            dto.IncludeTesting,
+            actorIds.ToImmutable(),
+            assignments.ToImmutable(),
+            dto.IncludeDesign);
     }
 
     private sealed class ScenarioPresetDto
     {
-        [JsonRequired]
-        public bool IncludeTesting { get; init; }
+            [JsonRequired]
+            public bool IncludeTesting { get; init; }
+
+            [JsonRequired]
+            public bool IncludeDesign { get; init; }
 
         [JsonRequired]
         public List<string> Actors { get; init; } = [];

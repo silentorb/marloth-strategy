@@ -8,4 +8,5 @@ namespace MarlothStrategy.Simulation.Production;
 public sealed record ScenarioSpec(
     bool IncludeTesting,
     ImmutableArray<ActorId> ActorIds,
-    ImmutableArray<Assignment> Assignments);
+    ImmutableArray<Assignment> Assignments,
+    bool IncludeDesign = false);

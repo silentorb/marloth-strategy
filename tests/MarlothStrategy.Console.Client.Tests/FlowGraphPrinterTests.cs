@@ -15,7 +15,8 @@ public sealed class FlowGraphPrinterTests
         new SellNodeConfig(Effort: 10, PayoutFloor: 0),
         new TreasuryNodeConfig(Effort: 1),
         new PayrollNodeConfig(DefaultWage: 10, Period: 5, Effort: 1),
-        new MergeNodeConfig(Effort: 1));
+        new MergeNodeConfig(Effort: 1),
+        new DesignNodeConfig(Effort: 3));
 
     private static readonly ImmutableDictionary<ActorId, Actor> DefaultActors =
         ImmutableDictionary<ActorId, Actor>.Empty
@@ -119,5 +120,6 @@ public sealed class FlowGraphPrinterTests
         Assert.Contains("──┐", enchantLine);
         Assert.DoesNotContain("testing", string.Join('\n', lines));
         Assert.DoesNotContain("merge", string.Join('\n', lines));
+        Assert.DoesNotContain("design", string.Join('\n', lines));
     }
 }

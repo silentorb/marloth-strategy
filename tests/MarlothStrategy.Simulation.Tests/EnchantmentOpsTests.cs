@@ -37,15 +37,38 @@ public sealed class EnchantmentOpsTests
         var (once, next) = EnchantmentOps.Mutate(genesis, EnchantConfig, nextUnitId: 1);
 
         Assert.Equal(10, once.VolumeCount);
-        Assert.Equal(1, once.DarknessCount);
+        Assert.Equal(2, once.DarknessCount);
         Assert.Equal(1, once.FallacyCount);
         Assert.Equal(genesis.Hash, once.ParentHash);
-        Assert.Equal(13UL, next);
+        Assert.Equal(14UL, next);
 
         var (twice, _) = EnchantmentOps.Mutate(once, EnchantConfig, next);
         Assert.Equal(20, twice.VolumeCount);
-        Assert.Equal(2, twice.DarknessCount);
-        Assert.Equal(3, twice.FallacyCount);
+        Assert.Equal(4, twice.DarknessCount);
+        Assert.Equal(4, twice.FallacyCount);
+    }
+
+    [Fact]
+    public void Mutate_DarknessUsesDoubledDeltaMinusDesigns()
+    {
+        var genesis = EnchantmentBlock.CreateGenesis();
+        var (block, next) = EnchantmentOps.Mutate(genesis, EnchantConfig, nextUnitId: 1, designs: 1);
+
+        Assert.Equal(10, block.VolumeCount);
+        Assert.Equal(1, block.DarknessCount);
+        Assert.Equal(1, block.FallacyCount);
+        Assert.Equal(13UL, next);
+    }
+
+    [Fact]
+    public void Mutate_DesignsClampDarknessAtZero()
+    {
+        var genesis = EnchantmentBlock.CreateGenesis();
+        var (block, _) = EnchantmentOps.Mutate(genesis, EnchantConfig, nextUnitId: 1, designs: 5);
+
+        Assert.Equal(0, block.DarknessCount);
+        Assert.Equal(1, block.FallacyCount);
+        Assert.Equal(10, block.VolumeCount);
     }
 
     [Fact]

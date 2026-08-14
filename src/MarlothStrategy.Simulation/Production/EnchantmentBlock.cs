@@ -115,13 +115,19 @@ public static class EnchantmentOps
     public static (EnchantmentBlock Block, ulong NextUnitId) Mutate(
         EnchantmentBlock parent,
         EnchantNodeConfig config,
-        ulong nextUnitId)
+        ulong nextUnitId,
+        int designs = 0)
     {
         ArgumentNullException.ThrowIfNull(parent);
         ArgumentNullException.ThrowIfNull(config);
+        if (designs < 0)
+        {
+            throw new InvalidOperationException("Designs count must be non-negative.");
+        }
 
         var volumeDelta = UnitCount(config.VolumeDelta);
         var darknessDelta = UnitCount(config.DarknessDelta);
+        var darknessAdd = Math.Max(0, (2 * darknessDelta) - designs);
         var fallacyAdd = parent.DarknessCount + UnitCount(config.FallacyConstant);
         if (volumeDelta < 0 || darknessDelta < 0 || fallacyAdd < 0)
         {
@@ -130,7 +136,7 @@ public static class EnchantmentOps
 
         var next = nextUnitId;
         var volume = parent.Volume.AddRange(Allocate(ref next, volumeDelta));
-        var darkness = parent.Darkness.AddRange(Allocate(ref next, darknessDelta));
+        var darkness = parent.Darkness.AddRange(Allocate(ref next, darknessAdd));
         var fallacy = parent.Fallacy.AddRange(Allocate(ref next, fallacyAdd));
         var block = EnchantmentBlock.Create(parent.Hash, volume, darkness, fallacy);
         return (block, next);
