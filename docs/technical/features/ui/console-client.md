@@ -48,9 +48,9 @@ The screen is three logical regions composed with classic single- and double-lin
 |--------|--------|---------|
 | Top status | Double outer | Title, `Tick N`, `actors:` line |
 | Left state | Double outer shared with right; node **subpanels** stacked with single-line horizontal dividers (`╟`/`╢` against double verticals) | One subpanel per graph node (id order): same port / timer / progress leaves as before |
-| Right flow | Double outer; interior uses single-line node boxes | MSAGL Sugiyama layout of nodes and edges from `GameState.Graph` (node→node); all edges drawn as connectors — no residual edge list |
+| Right flow | Double outer; interior uses single-line node boxes | MSAGL Sugiyama + rectilinear routing with `RelativeFloatingPort` anchors (inputs on top, outputs on bottom, spaced per port); ASCII rasterizes those polylines |
 
-Helpers: `BoxDrawing` (character constants), `AsciiCanvas` (char buffer), `PanelLayout` (compose top + split bottom; `LeftInteriorWidthForTotal`), `FlowGraphLayout` (MSAGL Sugiyama), `FlowGraphWires` (orthogonal connector direction masks → corner/tee/cross glyphs), `FlowGraphPrinter` (quantize layout onto a character grid).
+Helpers: `BoxDrawing` (character constants), `AsciiCanvas` (char buffer), `PanelLayout` (compose top + split bottom; `LeftInteriorWidthForTotal`), `FlowGraphLayout` (MSAGL layout + floating ports), `FlowGraphWires` (orthogonal connector glyphs), `FlowGraphPrinter` (quantize MSAGL geometry onto a character grid).
 
 ## State content rules
 
@@ -68,7 +68,7 @@ Leaf formatting inside left subpanels (and header actors) follows:
 | Timer | Shown for `payroll` from `NodeTimers` (rounded display as integer string); change arrows when previous state is supplied |
 | Payroll money | Seed payroll has a `money` input (wage delivery); empty displays as `0` like other resource ports |
 | Change annotations | When a previous state is supplied, compare rounded display strings per leaf; if different, print `previous → current` (U+2192); if equal, print current only. Tick 0 has no previous state (no arrows). Empty leaves use `0` (never `-`) |
-| Flow graph | Right panel: MSAGL Sugiyama positions quantized to a character grid; single-line boxed node ids; directed connectors for all node→node edges (self-loops annotated); isolated nodes included; top-aligned in the column |
+| Flow graph | Right panel: MSAGL positions and port-anchored edge routes quantized to a character grid; single-line boxed node ids; directed connectors for all port-to-port edges (self-loops annotated); isolated nodes included; top-aligned in the column |
 
 `AdvanceTickWithReport` still returns per-node I/O rows for Simulation consumers; the console Client does not print that table.
 

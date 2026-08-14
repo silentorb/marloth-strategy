@@ -3,10 +3,9 @@ using MarlothStrategy.Simulation.Production;
 using Microsoft.Msagl.Core.Geometry;
 using Microsoft.Msagl.Core.Geometry.Curves;
 using Microsoft.Msagl.Core.Layout;
-using Microsoft.Msagl.Drawing;
+using Microsoft.Msagl.Core.Routing;
 using Microsoft.Msagl.Layout.Layered;
 using Microsoft.Msagl.Miscellaneous;
-using DrawingGraph = Microsoft.Msagl.Drawing.Graph;
 using GeomEdge = Microsoft.Msagl.Core.Layout.Edge;
 using GeomNode = Microsoft.Msagl.Core.Layout.Node;
 
@@ -14,24 +13,34 @@ namespace MarlothStrategy.Console.Client;
 
 public readonly record struct FlowGraphPoint(double X, double Y);
 
-public sealed record FlowGraphLaidOutNode(NodeId Id, FlowGraphPoint Center, bool HasSelfLoop);
+public sealed record FlowGraphLaidOutNode(
+    NodeId Id,
+    FlowGraphPoint Center,
+    double Width,
+    double Height,
+    bool HasSelfLoop);
 
 public sealed record FlowGraphLaidOutEdge(
     NodeId From,
+    PortId FromPort,
     NodeId To,
+    PortId ToPort,
     IReadOnlyList<FlowGraphPoint> Points);
 
 public sealed record FlowGraphLayoutResult(
     IReadOnlyList<FlowGraphLaidOutNode> Nodes,
     IReadOnlyList<FlowGraphLaidOutEdge> Edges);
 
-/// <summary>Sugiyama layout of the production flow graph via MSAGL (node→node edges).</summary>
+/// <summary>
+/// Sugiyama layout via MSAGL with <see cref="RelativeFloatingPort"/> anchors so each game port
+/// gets a distinct attachment on its node; edge polylines come from MSAGL routing.
+/// </summary>
 public static class FlowGraphLayout
 {
-    private const int CurveSamples = 8;
-    private const double NodeHeight = 24;
-    private const double NodeWidthPadding = 24;
+    private const double NodeHeight = 28;
+    private const double NodeWidthPadding = 28;
     private const double NodeWidthPerChar = 8;
+    private const double MinNodeWidthForPorts = 48;
 
     public static FlowGraphLayoutResult Compute(GameState state)
     {
@@ -46,63 +55,81 @@ public static class FlowGraphLayout
             return new FlowGraphLayoutResult([], []);
         }
 
-        var edgePairs = state.Graph.Edges.Values
-            .Select(e => (From: e.From.Node, To: e.To.Node))
+        var portEdges = state.Graph.Edges.Values
+            .Select(e => (From: e.From.Node, FromPort: e.From.Port, To: e.To.Node, ToPort: e.To.Port))
             .Distinct()
+            .OrderBy(e => e.From.Value, StringComparer.Ordinal)
+            .ThenBy(e => e.FromPort.Value, StringComparer.Ordinal)
+            .ThenBy(e => e.To.Value, StringComparer.Ordinal)
+            .ThenBy(e => e.ToPort.Value, StringComparer.Ordinal)
             .ToArray();
 
-        var selfLoops = edgePairs
+        var selfLoops = portEdges
             .Where(e => e.From == e.To)
             .Select(e => e.From)
             .ToHashSet();
 
-        var forwardEdges = edgePairs
+        var outputsByNode = portEdges
             .Where(e => e.From != e.To)
-            .OrderBy(e => e.From.Value, StringComparer.Ordinal)
-            .ThenBy(e => e.To.Value, StringComparer.Ordinal)
-            .ToArray();
+            .GroupBy(e => e.From)
+            .ToDictionary(
+                g => g.Key,
+                g => g.Select(e => e.FromPort).Distinct().OrderBy(p => p.Value, StringComparer.Ordinal).ToArray());
 
-        var drawing = new DrawingGraph("flow");
-        drawing.Attr.LayerDirection = LayerDirection.TB;
+        var inputsByNode = portEdges
+            .Where(e => e.From != e.To)
+            .GroupBy(e => e.To)
+            .ToDictionary(
+                g => g.Key,
+                g => g.Select(e => e.ToPort).Distinct().OrderBy(p => p.Value, StringComparer.Ordinal).ToArray());
+
+        var geometry = new GeometryGraph();
+        var geomById = new Dictionary<NodeId, GeomNode>();
 
         foreach (var id in nodeIds)
         {
-            var node = drawing.AddNode(id.Value);
-            node.Attr.Shape = Shape.Box;
-            node.LabelText = id.Value;
-        }
+            var portCount = Math.Max(
+                outputsByNode.GetValueOrDefault(id)?.Length ?? 0,
+                inputsByNode.GetValueOrDefault(id)?.Length ?? 0);
+            var width = Math.Max(
+                MinNodeWidthForPorts,
+                NodeWidthPadding + id.Value.Length * NodeWidthPerChar);
+            if (portCount > 1)
+            {
+                width = Math.Max(width, portCount * 24.0);
+            }
 
-        foreach (var (from, to) in forwardEdges)
-        {
-            drawing.AddEdge(from.Value, to.Value);
-        }
-
-        var geometry = new GeometryGraph();
-        var geomById = new Dictionary<string, GeomNode>(StringComparer.Ordinal);
-
-        foreach (var drawingNode in drawing.Nodes)
-        {
-            var width = NodeWidthPadding + drawingNode.Id.Length * NodeWidthPerChar;
-            var curve = CurveFactory.CreateRectangle(
-                width,
-                NodeHeight,
-                new Point(0, 0));
-            var geomNode = new GeomNode(curve, drawingNode);
+            var curve = CurveFactory.CreateRectangle(width, NodeHeight, new Point(0, 0));
+            var geomNode = new GeomNode(curve) { UserData = id.Value };
             geometry.Nodes.Add(geomNode);
-            geomById[drawingNode.Id] = geomNode;
-            drawingNode.GeometryNode = geomNode;
+            geomById[id] = geomNode;
         }
 
-        foreach (var drawingEdge in drawing.Edges)
+        var geomEdges = new List<(GeomEdge Edge, NodeId From, PortId FromPort, NodeId To, PortId ToPort)>();
+        foreach (var (from, fromPort, to, toPort) in portEdges)
         {
-            var geomEdge = new GeomEdge(geomById[drawingEdge.Source], geomById[drawingEdge.Target]);
-            geometry.Edges.Add(geomEdge);
-            drawingEdge.GeometryEdge = geomEdge;
-        }
+            if (from == to)
+            {
+                continue;
+            }
 
-        drawing.GeometryGraph = geometry;
+            var source = geomById[from];
+            var target = geomById[to];
+            var geomEdge = new GeomEdge(source, target)
+            {
+                UserData = $"{from.Value}.{fromPort.Value}->{to.Value}.{toPort.Value}",
+            };
+
+            var outPorts = outputsByNode[from];
+            var inPorts = inputsByNode[to];
+            geomEdge.SourcePort = CreatePort(source, outPorts, fromPort, isOutput: true);
+            geomEdge.TargetPort = CreatePort(target, inPorts, toPort, isOutput: false);
+            geometry.Edges.Add(geomEdge);
+            geomEdges.Add((geomEdge, from, fromPort, to, toPort));
+        }
 
         var settings = new SugiyamaLayoutSettings();
+        settings.EdgeRoutingSettings.EdgeRoutingMode = EdgeRoutingMode.Rectilinear;
         LayoutHelpers.CalculateLayout(geometry, settings, cancelToken: null);
         geometry.UpdateBoundingBox();
 
@@ -114,50 +141,114 @@ public static class FlowGraphLayout
         var nodes = new List<FlowGraphLaidOutNode>(nodeIds.Length);
         foreach (var id in nodeIds)
         {
-            if (!geomById.TryGetValue(id.Value, out var geomNode))
-            {
-                throw new InvalidOperationException($"MSAGL layout missing geometry for node '{id.Value}'.");
-            }
-
+            var geomNode = geomById[id];
             nodes.Add(new FlowGraphLaidOutNode(
                 id,
                 new FlowGraphPoint(geomNode.Center.X, geomNode.Center.Y),
+                geomNode.Width,
+                geomNode.Height,
                 selfLoops.Contains(id)));
         }
 
-        var edges = new List<FlowGraphLaidOutEdge>(forwardEdges.Length);
-        foreach (var drawingEdge in drawing.Edges)
+        var edges = new List<FlowGraphLaidOutEdge>(geomEdges.Count);
+        foreach (var (geomEdge, from, fromPort, to, toPort) in geomEdges)
         {
-            var curve = drawingEdge.GeometryEdge.Curve
+            var curve = geomEdge.Curve
                 ?? throw new InvalidOperationException(
-                    $"MSAGL layout missing curve for edge '{drawingEdge.Source}' → '{drawingEdge.Target}'.");
+                    $"MSAGL layout missing curve for edge '{from.Value}.{fromPort.Value}' → '{to.Value}.{toPort.Value}'.");
 
-            var points = SampleCurve(curve, CurveSamples);
-            edges.Add(new FlowGraphLaidOutEdge(
-                new NodeId(drawingEdge.Source),
-                new NodeId(drawingEdge.Target),
-                points));
+            var points = ExtractPolyline(curve, geomEdge.SourcePort.Location, geomEdge.TargetPort.Location);
+            if (points.Count < 2)
+            {
+                throw new InvalidOperationException(
+                    $"MSAGL edge '{from.Value}.{fromPort.Value}' → '{to.Value}.{toPort.Value}' produced no polyline.");
+            }
+
+            edges.Add(new FlowGraphLaidOutEdge(from, fromPort, to, toPort, points));
         }
-
-        edges.Sort((a, b) =>
-        {
-            var c = string.CompareOrdinal(a.From.Value, b.From.Value);
-            return c != 0 ? c : string.CompareOrdinal(a.To.Value, b.To.Value);
-        });
 
         return new FlowGraphLayoutResult(nodes, edges);
     }
 
-    private static IReadOnlyList<FlowGraphPoint> SampleCurve(ICurve curve, int samples)
+    private static RelativeFloatingPort CreatePort(
+        GeomNode node,
+        IReadOnlyList<PortId> portsOnSide,
+        PortId port,
+        bool isOutput)
     {
-        var points = new FlowGraphPoint[samples + 1];
-        for (var i = 0; i <= samples; i++)
+        var index = 0;
+        for (var i = 0; i < portsOnSide.Count; i++)
         {
-            var par = curve.ParStart + (curve.ParEnd - curve.ParStart) * i / samples;
-            var p = curve[par];
-            points[i] = new FlowGraphPoint(p.X, p.Y);
+            if (portsOnSide[i] == port)
+            {
+                index = i;
+                break;
+            }
         }
 
+        var count = Math.Max(1, portsOnSide.Count);
+        // Evenly space across node width; Y offset to bottom (output) or top (input).
+        var fraction = count == 1 ? 0.0 : ((index + 1) / (double)(count + 1)) - 0.5;
+        var xOff = fraction * node.Width;
+        var yOff = isOutput ? -node.Height / 2.0 : node.Height / 2.0;
+        return new RelativeFloatingPort(
+            () => node.BoundaryCurve,
+            () => node.Center,
+            new Point(xOff, yOff));
+    }
+
+    /// <summary>Prefer axis-aligned line segments from rectilinear routing; keep port endpoints.</summary>
+    private static IReadOnlyList<FlowGraphPoint> ExtractPolyline(
+        ICurve curve,
+        Point sourcePort,
+        Point targetPort)
+    {
+        var points = new List<FlowGraphPoint>();
+        void Add(Point p)
+        {
+            var fp = new FlowGraphPoint(p.X, p.Y);
+            if (points.Count == 0
+                || Math.Abs(points[^1].X - fp.X) > 1e-6
+                || Math.Abs(points[^1].Y - fp.Y) > 1e-6)
+            {
+                points.Add(fp);
+            }
+        }
+
+        Add(sourcePort);
+
+        if (curve is Curve compound)
+        {
+            foreach (var seg in compound.Segments)
+            {
+                if (seg is LineSegment line)
+                {
+                    Add(line.Start);
+                    Add(line.End);
+                }
+                else
+                {
+                    // Skip fillet curves; the following line segment continues the route.
+                    Add(seg.End);
+                }
+            }
+        }
+        else if (curve is LineSegment single)
+        {
+            Add(single.Start);
+            Add(single.End);
+        }
+        else
+        {
+            const int samples = 12;
+            for (var i = 0; i <= samples; i++)
+            {
+                var par = curve.ParStart + (curve.ParEnd - curve.ParStart) * i / samples;
+                Add(curve[par]);
+            }
+        }
+
+        Add(targetPort);
         return points;
     }
 }

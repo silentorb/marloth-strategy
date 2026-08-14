@@ -28,36 +28,49 @@ public sealed class FlowGraphLayoutTests
                     .Add(ActorStatKeys.Sales, 10)));
 
     [Fact]
-    public void Compute_SeedGraph_IncludesEveryNodeAndCollapsedEdge()
+    public void Compute_SeedGraph_UsesPortAnchorsWithDistinctMergeInputs()
     {
         var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors);
         var layout = FlowGraphLayout.Compute(state);
 
-        var nodeIds = layout.Nodes.Select(n => n.Id.Value).OrderBy(v => v, StringComparer.Ordinal).ToArray();
-        Assert.Equal(
-            ["enchant", "merge", "payroll", "sell", "testing", "treasury"],
-            nodeIds);
-
         var edgeKeys = layout.Edges
-            .Select(e => $"{e.From.Value}->{e.To.Value}")
+            .Select(e => $"{e.From.Value}.{e.FromPort.Value}->{e.To.Value}.{e.ToPort.Value}")
             .OrderBy(v => v, StringComparer.Ordinal)
             .ToArray();
 
         Assert.Equal(
             [
-                "enchant->merge",
-                "enchant->testing",
-                "merge->enchant",
-                "sell->treasury",
-                "testing->merge",
-                "testing->sell",
-                "treasury->payroll",
+                "enchant.enchantment->merge.primary",
+                "enchant.enchantment->testing.enchantment",
+                "merge.enchantment->enchant.enchantment",
+                "sell.money->treasury.money",
+                "testing.enchantment->merge.secondary",
+                "testing.enchantment->sell.enchantment",
+                "treasury.money->payroll.money",
             ],
             edgeKeys);
 
-        foreach (var edge in layout.Edges)
-        {
-            Assert.NotEmpty(edge.Points);
-        }
+        var intoMerge = layout.Edges
+            .Where(e => e.To.Value == "merge")
+            .OrderBy(e => e.ToPort.Value, StringComparer.Ordinal)
+            .ToArray();
+        Assert.Equal(2, intoMerge.Length);
+        Assert.Equal("primary", intoMerge[0].ToPort.Value);
+        Assert.Equal("secondary", intoMerge[1].ToPort.Value);
+
+        var primaryEnd = intoMerge[0].Points[^1];
+        var secondaryEnd = intoMerge[1].Points[^1];
+        Assert.True(
+            Math.Abs(primaryEnd.X - secondaryEnd.X) > 1.0,
+            $"Expected distinct MSAGL port X for merge inputs, got primary={primaryEnd.X}, secondary={secondaryEnd.X}");
+
+        var mergeNode = layout.Nodes.Single(n => n.Id.Value == "merge");
+        Assert.True(primaryEnd.Y > mergeNode.Center.Y, "Inputs should attach toward the top of merge (Y-up).");
+        Assert.True(secondaryEnd.Y > mergeNode.Center.Y, "Inputs should attach toward the top of merge (Y-up).");
+
+        var mergeOut = layout.Edges.Single(e => e.From.Value == "merge");
+        Assert.True(
+            mergeOut.Points[0].Y < mergeNode.Center.Y,
+            "Merge output should leave toward the bottom (Y-up).");
     }
 }

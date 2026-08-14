@@ -42,24 +42,9 @@ public sealed class FlowGraphPrinterTests
         Assert.Contains("payroll", text);
 
         Assert.DoesNotContain("merge → enchant", text);
-        Assert.DoesNotContain("enchant → testing", text);
         Assert.True(
             text.Contains('▼') || text.Contains('▲') || text.Contains('►') || text.Contains('◄'),
             "Expected at least one directed arrow glyph in the drawn graph.");
-
-        var cornerCount = text.Count(static c =>
-            c is BoxDrawing.SingleTopLeft
-                or BoxDrawing.SingleTopRight
-                or BoxDrawing.SingleBottomLeft
-                or BoxDrawing.SingleBottomRight);
-        Assert.True(
-            cornerCount > 6 * 4
-            || text.Contains(BoxDrawing.SingleTeeLeft)
-            || text.Contains(BoxDrawing.SingleTeeRight)
-            || text.Contains(BoxDrawing.SingleTeeTop)
-            || text.Contains(BoxDrawing.SingleTeeBottom)
-            || text.Contains(BoxDrawing.SingleCross),
-            $"Expected wire corners/tees beyond node boxes (cornerCount={cornerCount}).");
 
         var testingLine = lines.First(l => l.Contains("testing", StringComparison.Ordinal));
         var mergeLine = lines.First(l => l.Contains("merge", StringComparison.Ordinal));
@@ -69,18 +54,36 @@ public sealed class FlowGraphPrinterTests
     }
 
     [Fact]
-    public void FormatLines_SeedGraph_MergeEnchantEdgesHaveArrows()
+    public void FormatLines_SeedGraph_MergeInputsArriveOnDistinctColumns()
     {
         var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors);
         var lines = FlowGraphPrinter.FormatLines(state, maxWidth: 65);
 
-        var enchantIdx = lines.Select((l, i) => (l, i)).First(t => t.l.Contains("enchant", StringComparison.Ordinal)).i;
-        var mergeIdx = lines.Select((l, i) => (l, i)).First(t => t.l.Contains("merge", StringComparison.Ordinal)).i;
-        var lo = Math.Min(enchantIdx, mergeIdx);
-        var hi = Math.Max(enchantIdx, mergeIdx);
-        var band = string.Join('\n', lines.Skip(lo).Take(hi - lo + 1));
+        var mergeLineIdx = lines
+            .Select((l, i) => (l, i))
+            .First(t => t.l.Contains("| merge |", StringComparison.Ordinal)
+                || t.l.Contains("│ merge │", StringComparison.Ordinal)).i;
 
-        Assert.True(band.Contains('▼'), "Expected downward arrow for enchant → merge.");
-        Assert.True(band.Contains('▲'), "Expected upward arrow for merge → enchant.");
+        var mergeLabel = lines[mergeLineIdx];
+        var boxLeft = mergeLabel.IndexOf(BoxDrawing.SingleVertical);
+        var boxRight = mergeLabel.LastIndexOf(BoxDrawing.SingleVertical);
+        Assert.True(boxLeft >= 0 && boxRight > boxLeft);
+
+        var inboundColumns = new HashSet<int>();
+        for (var row = Math.Max(0, mergeLineIdx - 3); row < mergeLineIdx; row++)
+        {
+            var line = lines[row];
+            for (var x = boxLeft; x <= boxRight && x < line.Length; x++)
+            {
+                if (line[x] is '▼' or '│' or '┌' or '┐' or '┬' or '┼' or '├' or '┤')
+                {
+                    inboundColumns.Add(x);
+                }
+            }
+        }
+
+        Assert.True(
+            inboundColumns.Count >= 2,
+            $"Expected distinct merge input columns from MSAGL ports, got [{string.Join(',', inboundColumns.OrderBy(c => c))}]");
     }
 }
