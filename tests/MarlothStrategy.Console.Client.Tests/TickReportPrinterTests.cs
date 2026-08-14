@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using MarlothStrategy.Console.Client;
+using MarlothStrategy.Simulation;
 using MarlothStrategy.Simulation.Graph;
 using MarlothStrategy.Simulation.Production;
 
@@ -79,6 +80,24 @@ public sealed class TickReportPrinterTests
         Assert.DoesNotContain("Effort", text);
         Assert.DoesNotContain("Consumed", text);
         Assert.DoesNotContain("volume: 0 \u2192", text);
+    }
+
+    [Fact]
+    public void FormatScreen_WithGameConfig_IncludesScenarioAndSeed()
+    {
+        var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors);
+        var lab01 = TickReportPrinter.FormatScreen(
+            state,
+            width: PanelLayout.DefaultWidth,
+            config: new GameConfig { ScenarioPreset = "lab01", ScenarioSeed = 42 });
+        var random = TickReportPrinter.FormatScreen(
+            state,
+            width: PanelLayout.DefaultWidth,
+            config: new GameConfig { ScenarioPreset = null, ScenarioSeed = 7 });
+
+        Assert.Contains("scenario: lab01 seed 42", lab01);
+        Assert.Contains("scenario: random seed 7", random);
+        Assert.DoesNotContain("scenario:", TickReportPrinter.FormatScreen(state, width: PanelLayout.DefaultWidth));
     }
 
     [Fact]

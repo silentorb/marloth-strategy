@@ -6,7 +6,7 @@ Authoritative production state lives in **Simulation** as an Imp-inspired node g
 
 ## When to read this
 
-- Changing graph/signal types, tick phases, assignment effort, progress, payroll/treasury, testing, merge, or seed factories
+- Changing graph/signal types, tick phases, assignment effort, progress, payroll/treasury, testing, merge, scenario presets, or seed factories
 - Implementing or testing `AdvanceTick` / `GameState`
 - Comparing Marloth’s graph model to Imp
 
@@ -94,7 +94,7 @@ Node configs include:
 
 ## Node behaviors
 
-Tunable numerics live in `config/node-types/{enchant,testing,merge,sell,treasury,payroll}.json` (heterogeneous schemas). Actors load from `config/actors/*.json`. Port layouts stay in code.
+Tunable numerics live in `config/node-types/{enchant,testing,merge,sell,treasury,payroll}.json` (heterogeneous schemas). Actor definitions load from `config/actors/*.json`. Scenario presets and the random actor pool live in `config/scenarios/`. Port layouts stay in code.
 
 ### `enchant`
 
@@ -170,19 +170,22 @@ Pipeline (each step returns new data; no mutation of prior state):
 Host pattern:
 
 ```csharp
-GameState state = MagicAgencySeed.CreateInitialState();
+GameState state = ScenarioBootstrap.CreateInitialState(config);
 state = AdvanceTick(state); // mutable binding, immutable values
 // or: var result = AdvanceTickWithReport(state); state = result.State;
 ```
 
-## Magic agency seed
+`MagicAgencySeed.CreateInitialState()` remains as a compatibility factory that loads preset `lab01`.
 
-Factory: `MagicAgencySeed.CreateInitialState()` (loads node configs and actors from `config/` under the app base directory; overloads accept explicit configs/actors).
+## Scenarios
 
-- Node types: `enchant` (in/out `enchantment`), `testing` (in/out `enchantment`), `merge` (in `primary`/`secondary`, out `enchantment`), `sell` (in `enchantment`, out `money`), `treasury` (in/out `money`), `payroll` (in `money`).
-- Nodes: `enchant`, `testing`, `merge`, `sell`, `treasury`, `payroll`.
-- Edges: `enchant.enchantment` → `testing.enchantment`; `enchant.enchantment` → `merge.primary`; `testing.enchantment` → `sell.enchantment`; `testing.enchantment` → `merge.secondary`; `merge.enchantment` → `enchant.enchantment`; `sell.money` → `treasury.money` (pending inbound on commit); `treasury.money` → `payroll.money` (wage funding / out delivery).
-- Actors from JSON: `intern` (capacity `1.0`, stats as configured, wage unset) and `boss` (capacity `1.0`, stats as configured, wage unset). Preferred assignments (weight `1` each): intern → enchant, merge, testing; boss → payroll, sell, treasury.
+Play bootstrap: `ScenarioBootstrap.CreateInitialState(GameConfig)` (loads node configs, actor definitions, and scenario JSON from `config/` under the app base directory; overloads accept explicit configs/actors/pool). `GameConfig.ScenarioPreset` selects a named file `config/scenarios/{name}.json`; null/whitespace generates a random scenario from `SCENARIO_SEED`. Unknown presets, invalid JSON, missing actors, or assignments to absent nodes are fail-fast (`InvalidOperationException` with path context).
+
+- Node types: `enchant` (in/out `enchantment`), `testing` (in/out `enchantment`), `merge` (in `primary`/`secondary`, out `enchantment`), `sell` (in `enchantment`, out `money`), `treasury` (in/out `money`), `payroll` (in `money`). Catalog always includes all six types.
+- **Essential graph:** nodes `enchant`, `sell`, `treasury`, `payroll`; edges `enchant.enchantment` → `sell.enchantment`; `sell.money` → `treasury.money` (pending inbound on commit); `treasury.money` → `payroll.money`.
+- **Testing+merge variation:** add nodes `testing` and `merge`; replace `enchant→sell` with `enchant.enchantment` → `testing.enchantment`; `enchant.enchantment` → `merge.primary`; `testing.enchantment` → `sell.enchantment`; `testing.enchantment` → `merge.secondary`; `merge.enchantment` → `enchant.enchantment`; money edges unchanged.
+- **Preset `lab01`:** `includeTestingMerge: true`; actors `intern` and `boss` (stats as configured, wages unset). Preferred assignments (weight `1` each): intern → enchant, merge, testing; boss → payroll, sell, treasury.
+- **Actor pool:** `config/scenarios/actor-pool.json` lists eligible actor ids (not every file under `config/actors/`). Random generation: coin-flip testing+merge; 2–4 distinct pool actors; preferred assignments (weight `1`) cover **every** graph node; multi-actor overlap on a node is allowed but sparse (more likely when actors are plentiful relative to nodes). Deterministic for a fixed seed.
 - Initial signals: `enchant.enchantment` = genesis empty block; `treasury.money` = `100`; `EnchantmentBlocks` contains genesis; `NextUnitId` = `1`; progress empty/`0`; payroll timer = `period`; pending money moves empty; `Tick = 0`.
 
 ## Layout
@@ -190,13 +193,14 @@ Factory: `MagicAgencySeed.CreateInitialState()` (loads node configs and actors f
 Under `src/MarlothStrategy.Simulation/`:
 
 - `Graph/` — structural Imp-like types
-- `Production/` — signals, catalog, `GameState`, seed, `AdvanceTick`, config DTOs/loaders, pending money moves
+- `Production/` — signals, catalog, `GameState`, scenario bootstrap/generation, seed compatibility, `AdvanceTick`, config DTOs/loaders, pending money moves
 - `config/node-types/` — JSON behavior numerics per node type (copied to output)
 - `config/actors/` — JSON actor definitions (copied to output)
+- `config/scenarios/` — named presets (`lab01.json`) and `actor-pool.json` (copied to output)
 
 ## Error handling
 
-Seed and tick assume a well-formed graph for v1 (programmer invariants). Malformed catalogs or missing node types are exceptional (`InvalidOperationException`). Missing or invalid node-type or actor JSON at seed/boot is exceptional (fail-fast with path context). Expected empty stocks, occupancy skips, payday mass-quit, and empty pending queues are normal.
+Seed and tick assume a well-formed graph for v1 (programmer invariants). Malformed catalogs or missing node types are exceptional (`InvalidOperationException`). Missing or invalid node-type, actor, preset, or actor-pool JSON at seed/boot is exceptional (fail-fast with path context). Expected empty stocks, occupancy skips, payday mass-quit, and empty pending queues are normal.
 
 ## Related docs
 

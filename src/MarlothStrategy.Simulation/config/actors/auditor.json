@@ -1,0 +1,8 @@
+{
+  "id": "auditor",
+  "capacity": 1.0,
+  "stats": {
+    "testing": 10,
+    "treasury": 6
+  }
+}

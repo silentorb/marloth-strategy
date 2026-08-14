@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Globalization;
+using MarlothStrategy.Simulation;
 using MarlothStrategy.Simulation.Graph;
 using MarlothStrategy.Simulation.Production;
 
@@ -14,7 +15,8 @@ public static class TickReportPrinter
         GameState state,
         GameState? previous = null,
         ProductionTickResult? tick = null,
-        int width = PanelLayout.DefaultWidth)
+        int width = PanelLayout.DefaultWidth,
+        GameConfig? config = null)
     {
         ArgumentNullException.ThrowIfNull(state);
         _ = tick;
@@ -28,8 +30,13 @@ public static class TickReportPrinter
         {
             Title,
             $"Tick {state.Tick}",
-            FormatActorsLine(state, previous),
         };
+        if (config is not null)
+        {
+            header.Add($"scenario: {config.ScenarioLabel} seed {config.ScenarioSeed}");
+        }
+
+        header.Add(FormatActorsLine(state, previous));
 
         var nodes = state.Graph.Nodes.Keys
             .OrderBy(id => id.Value, StringComparer.Ordinal)

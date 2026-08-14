@@ -9,8 +9,8 @@ public static class ConsoleClient
     {
         ArgumentNullException.ThrowIfNull(config);
 
-        var state = MagicAgencySeed.CreateInitialState();
-        DrawReport(state);
+        var state = ScenarioBootstrap.CreateInitialState(config);
+        DrawReport(state, config);
 
         while (true)
         {
@@ -22,14 +22,14 @@ public static class ConsoleClient
                     System.Console.WriteLine("Exiting.");
                     return;
                 case PromptAction.Unknown:
-                    DrawReport(state);
+                    DrawReport(state, config);
                     System.Console.WriteLine("Unknown input. Press Enter for next tick, or q to quit.");
                     continue;
                 case PromptAction.Advance:
                     var previous = state;
                     var result = ProductionTick.AdvanceTickWithReport(state);
                     state = result.State;
-                    DrawReport(state, previous, result);
+                    DrawReport(state, config, previous, result);
                     break;
             }
         }
@@ -37,12 +37,13 @@ public static class ConsoleClient
 
     private static void DrawReport(
         GameState state,
+        GameConfig config,
         GameState? previous = null,
         ProductionTickResult? tick = null)
     {
         TryClear();
         var width = ResolveWidth();
-        System.Console.WriteLine(TickReportPrinter.FormatScreen(state, previous, tick, width));
+        System.Console.WriteLine(TickReportPrinter.FormatScreen(state, previous, tick, width, config));
         System.Console.WriteLine();
     }
 

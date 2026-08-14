@@ -1,0 +1,8 @@
+{
+  "id": "envoy",
+  "capacity": 1.0,
+  "stats": {
+    "sales": 12,
+    "enchanting": 4
+  }
+}

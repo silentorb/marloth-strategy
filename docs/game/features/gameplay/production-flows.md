@@ -9,7 +9,7 @@ The first domain is a **magic agency** that creates enchantments as a service.
 ## When to read this
 
 - Designing or changing production, resources, nodes, actors, or assignment rules
-- Adding a new production domain or seed scenario
+- Adding a new production domain, scenario preset, or random scenario rules
 - Explaining turn/tick pacing for production
 
 ## Nodes and signals
@@ -61,23 +61,44 @@ Do not use “man/manning” in product language; use **assignment** / **assigne
 - Enchantment uses **buffered** cross-tick signals (outputs visible next tick). Sell payouts enqueue treasury inbound on commit; payroll payday enqueues outbound when its application completes (routing declared by `treasury.money` → `payroll.money`). Treasury applies only moves already pending at the start of the tick (no same-tick money chain); successful outs emit money along outgoing edges.
 - Information ports hold a single value. If a consumer still has stock after residuals, a routed copy to that port is **skipped** that commit (occupancy).
 
-## Magic agency seed (initial configuration)
+## Scenarios (initial configuration)
+
+Play boots from a **named preset** or a **seeded random** scenario. Unset `SCENARIO_PRESET` generates a random scenario; unset `SCENARIO_SEED` picks an integer seed at boot. The console status header shows `scenario: {preset-or-random} seed {N}` so a session can be reproduced.
+
+### Essential graph and testing+merge variation
+
+The **essential** graph is the economic spine:
+
+- Nodes: `enchant`, `sell`, `treasury`, `payroll`
+- Edges: `enchant.enchantment` → `sell.enchantment`; `sell.money` → `treasury.money` (pending inbound); `treasury.money` → `payroll.money`
+
+The only graph variation is whether **testing + merge** are included as a unit. When included, the direct `enchant→sell` edge is replaced by today’s fan-out/loop: `enchant` → `testing` and `enchant` → `merge.primary`; `testing` → `sell` and `testing` → `merge.secondary`; `merge` → `enchant`; money edges unchanged.
+
+Node types (always in the catalog): `enchant` — mutate or pass-through; `testing` — remove fallacy units; `merge` — combine primary/secondary branches; `sell` — consume enchantment, emit payout; `treasury` — store money via pending moves; `payroll` — timer + payday enqueue + money input.
 
 | Piece | Detail |
 |-------|--------|
-| Actors | Two actors from JSON: `intern` (capacity `1.0`, stats `enchanting: 10`, `sales: 10`) and `boss` (capacity `1.0`, stats `sales: 10`, `payroll: 10`, `treasury: 10`); wages unset |
-| Nodes | `enchant` — mutate or pass-through; `testing` — remove fallacy units; `merge` — combine primary/secondary branches; `sell` — consume enchantment, emit payout; `treasury` — store money via pending moves; `payroll` — timer + payday enqueue + money input |
 | Enchant formula | On each mutation: append `volumeDelta` volume units, `darknessDelta` darkness units, and `(darknessCount + fallacyConstant)` fallacy units (defaults `10` / `1` / `1`). Required work: `effort + darknessCount` |
 | Testing formula | On each application: remove `fallacyReduction × effectiveActorCount` fallacy units by ascending id (defaults `effort: 10`, `fallacyReduction: 5`) |
 | Merge formula | Effort `5` (lower than enchant). Fast-forward / primary-on-divergence / else three-way set merge per property: omit ancestor units missing from either side; otherwise union |
 | Sell formula | payout = `max(payoutFloor, volumeCount - fallacyCount)` (default `payoutFloor=0`) |
-| Graph | Enchantment **fans out**: `enchant` → `testing` and `enchant` → `merge.primary`; `testing` → `sell` and `testing` → `merge.secondary`; `merge` → `enchant`; money: `sell.money` → treasury pending inbound; `treasury.money` → `payroll.money` |
-| Assignment | Preferred (weight `1` each): `intern` → `enchant`, `merge`, `testing`; `boss` → `payroll`, `sell`, `treasury`; effective set filtered by prerequisites; capacity split by relative weights |
 | Work / payroll | Config `effort: 10` on enchant/testing/sell; merge `effort: 5`; treasury `effort: 2`; payroll `defaultWage: 10`, `period: 5`, `effort: 5`; progress gain uses actor stats × assignment effort (`merging` default `1`); wage total covers **all** roster actors |
-| Config | Node numerics in `config/node-types/{enchant,testing,merge,sell,treasury,payroll}.json`; actors in `config/actors/*.json`; port layouts and seed wiring stay in code |
-| Starting stocks | Seed primes ports: `enchant` enchantment = genesis empty block; `treasury` money = `100`; sell/testing/merge empty; payroll timer = `period`; pending money moves empty; block map holds genesis; node progress `0` |
+| Starting stocks | Prime ports: `enchant` enchantment = genesis empty block; `treasury` money = `100`; other process ports empty; payroll timer = `period`; pending money moves empty; block map holds genesis; node progress `0` |
+| Config | Node numerics in `config/node-types/{enchant,testing,merge,sell,treasury,payroll}.json`; actor definitions in `config/actors/*.json`; named presets and the actor pool in `config/scenarios/`; port layouts and graph construction stay in code |
 
-Expected early behavior: first tick only enchant is effective among enchantment nodes (testing/sell/merge empty); capacity may also split to treasury/payroll only when their prerequisites hold. Enchant mutations cost more as darkness rises. Sell deposits wait for treasury progress before the pile grows. Every `period` ticks the timer hits due; payday needs payroll progress, then treasury progress to debit (or mass-quit). Console shows aggregate unit counts and an abbreviated block hash.
+### Preset `lab01`
+
+Named JSON preset matching the original magic-agency start: `includeTestingMerge: true`; roster `intern` (capacity `1.0`, stats `enchanting: 10`, `sales: 10`) and `boss` (capacity `1.0`, stats `sales: 10`, `payroll: 10`, `treasury: 10`); wages unset. Preferred assignments (weight `1` each): intern → enchant, merge, testing; boss → payroll, sell, treasury.
+
+`MagicAgencySeed.CreateInitialState()` still loads `lab01` for tests and compatibility.
+
+### Actor pool and random generation
+
+Random generation does **not** use every file under `config/actors/`. Eligibility is the explicit id list in `config/scenarios/actor-pool.json` (intern, boss, plus additional pool members). Other actor JSON on disk may exist without being in the pool.
+
+When generating: coin-flip testing+merge; pick **2–4** distinct pool actors without replacement; assign preferred nodes (weight `1`) so **every graph node has at least one assignment**. Overlap (multiple actors preferred on the same node) is allowed but sparse, and more likely when actors are plentiful relative to nodes. Same `SCENARIO_SEED` yields the same graph flag, roster, and assignments.
+
+Expected early behavior on `lab01`: first tick only enchant is effective among enchantment nodes (testing/sell/merge empty); capacity may also split to treasury/payroll only when their prerequisites hold. Enchant mutations cost more as darkness rises. Sell deposits wait for treasury progress before the pile grows. Every `period` ticks the timer hits due; payday needs payroll progress, then treasury progress to debit (or mass-quit). Console shows aggregate unit counts and an abbreviated block hash.
 
 ## Related docs
 

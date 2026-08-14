@@ -1,0 +1,9 @@
+{
+  "id": "apprentice",
+  "capacity": 1.0,
+  "stats": {
+    "enchanting": 8,
+    "testing": 6,
+    "merging": 4
+  }
+}

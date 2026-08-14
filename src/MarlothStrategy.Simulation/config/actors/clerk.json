@@ -1,0 +1,8 @@
+{
+  "id": "clerk",
+  "capacity": 1.0,
+  "stats": {
+    "sales": 8,
+    "payroll": 6
+  }
+}

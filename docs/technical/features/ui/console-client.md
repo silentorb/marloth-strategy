@@ -10,14 +10,14 @@
 - Wiring Client to Simulation tick/report APIs
 - Adding IDE play launch configuration for the console App
 - Changing box-drawing / panel layout helpers
-- Adding or changing optional play-only dotenv / `.env` overrides on the App host
+- Adding or changing optional play-only dotenv / `.env` overrides on the App host (`SCENARIO_PRESET`, `SCENARIO_SEED`)
 
 ## Host and session
 
 - Before constructing `GameConfig`, App loads an optional repo `.env` via DotNetEnv (`NoClobber` + `TraversePath`). Missing file is a no-op; unset keys must keep **production** play behavior. Shell-set env vars win over file values. Play-only developer tweaks — not used by tests (App is not on the test graph). See [`.env.example`](../../../../.env.example).
-- App constructs `GameConfig` and calls `ConsoleClient.Run(config)`.
+- App reads `SCENARIO_PRESET` (optional name; whitespace/empty → unset → random scenario) and `SCENARIO_SEED` (optional integer; unset → `Random.Shared.Next()`; invalid → fail-fast at the abort boundary) into `GameConfig`, then calls `ConsoleClient.Run(config)`.
 - Prefer a **single abort boundary** at process entry for fatal/unrecoverable errors ([error handling](../platform/error-handling.md)); do not scatter catches in Client.
-- Client seeds with `MagicAgencySeed.CreateInitialState()`, clears the screen, prints the tick-0 panel screen, then loops until quit/EOF ([console loop](../../../game/features/session/console-loop.md)).
+- Client boots with `ScenarioBootstrap.CreateInitialState(config)`, clears the screen, prints the tick-0 panel screen, then loops until quit/EOF ([console loop](../../../game/features/session/console-loop.md)).
 - On Enter: capture prior state, `var result = ProductionTick.AdvanceTickWithReport(state); state = result.State;` then clear and print `FormatScreen(state, previous, result)` so change arrows use committed stocks (and payroll timer / actors).
 - Interactive input uses `Console.ReadKey(intercept: true)` so **Enter** and **`q`/`Q`** are single keypresses. When `Console.IsInputRedirected`, fall back to `ReadLine` (empty line / `q`) for agent piped smoke.
 - Invalid prompt input clears, redraws the current screen, prints a short hint, and re-prompts. Expected player mistakes are not exceptions.
@@ -61,6 +61,7 @@ Leaf formatting inside left subpanels (and header actors) follows:
 | Rule | Detail |
 |------|--------|
 | Title / tick | Header lines: `Marloth Strategy`, then `Tick {N}` |
+| Scenario | When `GameConfig` is supplied: `scenario: {preset-or-random} seed {N}` (`lab01`, `random`, etc.) |
 | Actors | One `actors:` line: comma-separated actor ids (ordinal) when present; `0` when the roster is empty. With a previous state, annotate roster changes with `previous → current` (e.g. `boss, intern → 0` after a mass quit) |
 | Nodes | One left subpanel per graph node, ordered by node id. Each subpanel splits horizontally: state leaves on the left; preferred assignments on the right (`actorId weight`, ordinal by actor id) |
 | Ports | Union of the node type’s input and output ports (ordinal by port id). Same-named input/output ports share one committed `PortSignals` stock and one display entry |
