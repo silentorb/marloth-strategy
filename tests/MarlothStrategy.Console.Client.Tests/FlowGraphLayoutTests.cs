@@ -37,11 +37,47 @@ public sealed class FlowGraphLayoutTests
                         .Add(ActorStatKeys.Payroll, 10)
                         .Add(ActorStatKeys.Treasury, 10)));
 
+    private static GameState MergeFixture()
+    {
+        var seed = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors);
+        return seed with
+        {
+            Graph = GraphFactory.CreateGraphWithMergeNode(),
+            Assignments = seed.Assignments.Add(
+                new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.MergeNodeId)),
+        };
+    }
+
     [Fact]
-    public void Compute_SeedGraph_UsesPortAnchorsWithDistinctMergeInputs()
+    public void Compute_SeedGraph_UsesPortAnchorsAndEnchantSelfLoop()
     {
         var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors);
         var layout = FlowGraphLayout.Compute(state);
+
+        var edgeKeys = layout.Edges
+            .Select(e => $"{e.From.Value}.{e.FromPort.Value}->{e.To.Value}.{e.ToPort.Value}")
+            .OrderBy(v => v, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(
+            [
+                "enchant.enchantment->testing.enchantment",
+                "sell.money->treasury.money",
+                "testing.enchantment->enchant.enchantment",
+                "testing.enchantment->sell.enchantment",
+                "treasury.money->payroll.money",
+            ],
+            edgeKeys);
+
+        Assert.True(layout.Nodes.Single(n => n.Id.Value == "enchant").HasSelfLoop);
+        Assert.DoesNotContain(layout.Edges, e => e.From == e.To);
+        Assert.DoesNotContain(layout.Nodes, n => n.Id.Value == "merge");
+    }
+
+    [Fact]
+    public void Compute_MergeFixture_UsesDistinctMergeInputAnchors()
+    {
+        var layout = FlowGraphLayout.Compute(MergeFixture());
 
         var edgeKeys = layout.Edges
             .Select(e => $"{e.From.Value}.{e.FromPort.Value}->{e.To.Value}.{e.ToPort.Value}")
@@ -90,7 +126,7 @@ public sealed class FlowGraphLayoutTests
     public void Compute_EssentialGraph_MarksEnchantSelfLoopAndOmitsItFromRoutedEdges()
     {
         var spec = new ScenarioSpec(
-            IncludeTestingMerge: false,
+            IncludeTesting: false,
             ImmutableArray.Create(MagicAgencySeed.ActorId),
             ImmutableArray.Create(
                 new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.EnchantNodeId)));

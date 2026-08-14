@@ -4,7 +4,7 @@ using MarlothStrategy.Simulation.Graph;
 namespace MarlothStrategy.Simulation.Production;
 
 /// <summary>
-/// Seeded random scenario: essential graph ± testing/merge, plus a subset of the actor pool.
+/// Seeded random scenario: essential graph ± testing, plus a subset of the actor pool.
 /// </summary>
 public static class ScenarioGenerator
 {
@@ -20,8 +20,8 @@ public static class ScenarioGenerator
         }
 
         var random = new Random(seed);
-        var includeTestingMerge = random.Next(2) == 1;
-        var (graph, _) = GraphFactory.Create(includeTestingMerge);
+        var includeTesting = random.Next(2) == 1;
+        var (graph, _) = GraphFactory.Create(includeTesting);
         var nodes = graph.Nodes.Keys
             .OrderBy(id => id.Value, StringComparer.Ordinal)
             .ToArray();
@@ -35,7 +35,7 @@ public static class ScenarioGenerator
         var assignments = BuildAssignments(actorIds, nodes, random);
 
         return new ScenarioSpec(
-            includeTestingMerge,
+            includeTesting,
             actorIds.ToImmutableArray(),
             assignments);
     }

@@ -6,7 +6,7 @@ Authoritative production state lives in **Simulation** as an Imp-inspired node g
 
 ## When to read this
 
-- Changing graph/signal types, tick phases, assignment effort, progress, payroll/treasury, testing, merge, scenario presets, or seed factories
+- Changing graph/signal types, tick phases, assignment effort, progress, payroll/treasury, testing, merge, port-level `+`, scenario presets, or seed factories
 - Implementing or testing `AdvanceTick` / `GameState`
 - Comparing Marloth’s graph model to Imp
 
@@ -57,10 +57,10 @@ Port signals are keyed by `(NodeId, PortId)`. Node progress and node timers are 
 
 | Kind | Payload | Route / merge |
 |------|---------|---------------|
-| **Resource (money)** | Scalar quantity (`Money`) | Owned on the holding node. Money routed onto treasury’s money port **enqueues** a pending inbound move (does not `AddResource` into the committed pile). Payroll payday enqueues outbound; treasury applications apply one pending move per effort |
-| **Information** | Single structure (`Enchantment` block) | **Copy** along each outgoing edge; **set** on destination when empty. Mutate only inside node logic |
+| **Resource (money)** | Scalar quantity (`Money`) | Owned on the holding node. Money routed onto treasury’s money port **enqueues** a pending inbound move (does not `AddResource` into the committed pile). Other money edges **`+`** via `AddResource`. Payroll payday enqueues outbound; treasury applications apply one pending move per effort |
+| **Information** | Single structure (`Enchantment` block) | **Copy** along each outgoing edge. At the destination, residual plus every routed copy **`+`** via `EnchantmentOps.TryCombine`. Mutate only inside node logic |
 
-Residuals are applied first. A routed information copy applies only if the destination is **empty** after residuals; if occupied, that edge’s copy is **skipped** (occupancy). Two routed information writes into an empty port are exceptional (fail-fast).
+Residuals are applied first, then all routed copies into a destination combine in one n-ary `+`. Incompatible enchantment histories (any pair with no common ancestor) yield no value: the destination is **empty**, including any residual. Combine is order-independent.
 
 ## Assignment effort and prerequisites
 
@@ -116,8 +116,8 @@ Tunable numerics live in `config/node-types/{enchant,testing,merge,sell,treasury
 - Inputs: `primary`, `secondary` (enchantment); output: `enchantment`.
 - Config: `effort` (seed `1`).
 - Stat: `merging` (default `1`).
-- Prerequisite: both inputs present. With assignment effort and progress ≥ effort: consume both; emit resolved block.
-- Resolution: same hash → that block; ancestor/descendant → newer tip; no common ancestor → primary; else three-way merge per property `(P ∩ S) ∪ (P − A) ∪ (S − A)`, new block parent = primary hash.
+- Prerequisite: both inputs present. With assignment effort and progress ≥ effort: consume both; emit `TryCombine` result (or nothing if incompatible).
+- Resolution (same as port-level `+`): same hash → that block; ancestor/descendant → newer tip; any pair with no common ancestor → no value; else n-way merge per property (omit ancestor units missing from any side; otherwise union), new block parent = lexicographically smaller incomparable-tip hash.
 
 ### `sell`
 
@@ -163,7 +163,7 @@ Pipeline (each step returns new data; no mutation of prior state):
 1. **`ResolveInputs`** — For each node input port, take the value already committed on that port.
 2. **`ResolveEffectiveAssignments` / assignment effort** — Filter preferred assignments by prerequisites; split each actor’s capacity by relative weights over effective rows.
 3. **`ComputeOutputs`** — Node-type-specific behavior using each node’s port inputs, assignment effort, stats, progress, and start-of-tick pending moves. Nodes are independent (no same-tick money chain). Node iteration order must not change results. May enqueue payroll outbound onto a next-pending builder (when a treasury→payroll money funding edge exists); treasury only drains the start-of-tick queue into residuals / actor updates and may emit money on successful outs.
-4. **`CommitSignals`** — Residuals; route outputs (information set if empty / skip if occupied; money to treasury **enqueues inbound** on the pending builder; other money edges **AddResource** as usual, including treasury→payroll wage delivery).
+4. **`CommitSignals`** — Residuals; route outputs (group by destination; residual + routed copies **`+`** — money `AddResource`, enchantment `TryCombine`; incompatible enchantment histories omit the dest key; money to treasury **enqueues inbound** on the pending builder, including treasury→payroll wage delivery). Register any new combined enchantment block.
 5. **`AdvancePayrollTimer`** — If payroll elapsed `< period`, increment by 1 (no auto-pay).
 6. **`NextState`** — New signals, updated progress/timers/pending maps, actors/assignments, `Tick + 1`.
 
@@ -181,11 +181,11 @@ state = AdvanceTick(state); // mutable binding, immutable values
 
 Play bootstrap: `ScenarioBootstrap.CreateInitialState(GameConfig)` (loads node configs, actor definitions, and scenario JSON from `config/` under the app base directory; overloads accept explicit configs/actors/pool). `GameConfig.ScenarioPreset` selects a named file `config/scenarios/{name}.json`; null/whitespace generates a random scenario from `SCENARIO_SEED`. Unknown presets, invalid JSON, missing actors, or assignments to absent nodes are fail-fast (`InvalidOperationException` with path context).
 
-- Node types: `enchant` (in/out `enchantment`), `testing` (in/out `enchantment`), `merge` (in `primary`/`secondary`, out `enchantment`), `sell` (in `enchantment`, out `money`), `treasury` (in/out `money`), `payroll` (in `money`). Catalog always includes all six types.
+- Node types: `enchant` (in/out `enchantment`), `testing` (in/out `enchantment`), `merge` (in `primary`/`secondary`, out `enchantment`; catalog only — not in seeded graphs), `sell` (in `enchantment`, out `money`), `treasury` (in/out `money`), `payroll` (in `money`). Catalog always includes all six types.
 - **Essential graph:** nodes `enchant`, `sell`, `treasury`, `payroll`; edges `enchant.enchantment` → `enchant.enchantment` (self-loop); `enchant.enchantment` → `sell.enchantment`; `sell.money` → `treasury.money` (pending inbound on commit); `treasury.money` → `payroll.money`.
-- **Testing+merge variation:** add nodes `testing` and `merge`; replace `enchant→enchant` with `enchant.enchantment` → `merge.primary`; replace `enchant→sell` with `enchant.enchantment` → `testing.enchantment`; `testing.enchantment` → `sell.enchantment`; `testing.enchantment` → `merge.secondary`; `merge.enchantment` → `enchant.enchantment`; money edges unchanged.
-- **Preset `lab01`:** `includeTestingMerge: true`; actors `intern` and `boss` (stats as configured, wages unset). Preferred assignments (weight `1` each): intern → enchant, merge, testing; boss → payroll, sell, treasury.
-- **Actor pool:** `config/scenarios/actor-pool.json` lists eligible actor ids (not every file under `config/actors/`). Random generation: coin-flip testing+merge; 2–4 distinct pool actors; preferred assignments (weight `1`) cover **every** graph node; multi-actor overlap on a node is allowed but sparse (more likely when actors are plentiful relative to nodes). Deterministic for a fixed seed.
+- **Testing variation:** add node `testing`; keep the enchant self-loop; replace `enchant→sell` with `enchant.enchantment` → `testing.enchantment`; `testing.enchantment` → `sell.enchantment`; `testing.enchantment` → `enchant.enchantment` (fan-in `+` with the self-loop); money edges unchanged.
+- **Preset `lab01`:** `includeTesting: true`; actors `intern` and `boss` (stats as configured, wages unset). Preferred assignments (weight `1` each): intern → enchant, testing; boss → payroll, sell, treasury.
+- **Actor pool:** `config/scenarios/actor-pool.json` lists eligible actor ids (not every file under `config/actors/`). Random generation: coin-flip testing; 2–4 distinct pool actors; preferred assignments (weight `1`) cover **every** graph node; multi-actor overlap on a node is allowed but sparse (more likely when actors are plentiful relative to nodes). Deterministic for a fixed seed.
 - Initial signals: `enchant.enchantment` = genesis empty block; `treasury.money` = `100`; `EnchantmentBlocks` contains genesis; `NextUnitId` = `1`; progress empty/`0`; payroll timer = `0`; pending money moves empty; `Tick = 0`.
 
 ## Layout
@@ -200,7 +200,7 @@ Under `src/MarlothStrategy.Simulation/`:
 
 ## Error handling
 
-Seed and tick assume a well-formed graph for v1 (programmer invariants). Malformed catalogs or missing node types are exceptional (`InvalidOperationException`). Missing or invalid node-type, actor, preset, or actor-pool JSON at seed/boot is exceptional (fail-fast with path context). Expected empty stocks, occupancy skips, payday mass-quit, and empty pending queues are normal.
+Seed and tick assume a well-formed graph for v1 (programmer invariants). Malformed catalogs or missing node types are exceptional (`InvalidOperationException`). Missing or invalid node-type, actor, preset, or actor-pool JSON at seed/boot is exceptional (fail-fast with path context). Expected empty stocks, incompatible-enchantment empty ports, payday mass-quit, and empty pending queues are normal.
 
 ## Related docs
 

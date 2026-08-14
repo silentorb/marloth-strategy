@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using MarlothStrategy.Simulation.Graph;
 
 namespace MarlothStrategy.Simulation.Production;
@@ -21,7 +22,8 @@ public abstract record SignalValue(SignalTypeId TypeId)
     }
 
     /// <summary>
-    /// Information: a single enchantment block. Copied on route and mutated by nodes (not additively merged).
+    /// Information: a single enchantment block. Copied on route; fan-in combines via
+    /// <see cref="EnchantmentOps.TryCombine"/> (the information <c>+</c> operator).
     /// </summary>
     public sealed record Enchantment(EnchantmentBlock Block) : SignalValue(SignalTypes.Enchantment)
     {
@@ -67,6 +69,70 @@ public abstract record SignalValue(SignalTypeId TypeId)
             Money m when other is Money o => m.Add(o.Amount),
             _ => throw new InvalidOperationException($"Unsupported resource add for {TypeId}."),
         };
+    }
+
+    /// <summary>
+    /// Combines same-typed signals (<c>+</c>): money adds; enchantment uses
+    /// <see cref="EnchantmentOps.TryCombine"/>. Returns <c>false</c> when the set is empty
+    /// or enchantment histories are incompatible (destination should be empty).
+    /// </summary>
+    public static bool TryCombine(
+        IReadOnlyList<SignalValue> values,
+        IDictionary<string, EnchantmentBlock> blocks,
+        [NotNullWhen(true)] out SignalValue? combined)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+        ArgumentNullException.ThrowIfNull(blocks);
+
+        combined = null;
+        if (values.Count == 0)
+        {
+            return false;
+        }
+
+        var first = values[0];
+        ArgumentNullException.ThrowIfNull(first);
+        for (var i = 1; i < values.Count; i++)
+        {
+            ArgumentNullException.ThrowIfNull(values[i]);
+            if (values[i].TypeId != first.TypeId)
+            {
+                throw new InvalidOperationException(
+                    $"Cannot combine signal types {first.TypeId} and {values[i].TypeId}.");
+            }
+        }
+
+        switch (first)
+        {
+            case Money:
+                SignalValue acc = first;
+                for (var i = 1; i < values.Count; i++)
+                {
+                    acc = acc.AddResource(values[i]);
+                }
+
+                combined = acc;
+                return true;
+
+            case Enchantment:
+                var inputBlocks = new EnchantmentBlock[values.Count];
+                for (var i = 0; i < values.Count; i++)
+                {
+                    inputBlocks[i] = ((Enchantment)values[i]).Block;
+                }
+
+                var block = EnchantmentOps.TryCombine(inputBlocks, blocks);
+                if (block is null)
+                {
+                    return false;
+                }
+
+                combined = new Enchantment(block);
+                return true;
+
+            default:
+                throw new InvalidOperationException($"Unknown signal value kind: {first.GetType().Name}.");
+        }
     }
 
     public bool IsEmptyResource => this is Money { Amount: 0 };

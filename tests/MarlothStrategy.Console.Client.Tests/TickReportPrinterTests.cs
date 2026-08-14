@@ -63,9 +63,9 @@ public sealed class TickReportPrinterTests
         Assert.Contains("    fallacy: 0", text);
         Assert.Contains("  progress: 0 / 10", text);
         Assert.Contains("testing:", text);
-        Assert.Contains("merge:", text);
-        Assert.Contains("  primary: 0", text);
-        Assert.Contains("  secondary: 0", text);
+        Assert.DoesNotContain("merge:", text);
+        Assert.DoesNotContain("  primary: 0", text);
+        Assert.DoesNotContain("  secondary: 0", text);
         Assert.Contains("payroll:", text);
         Assert.Contains("  timer: 0 / 5", text);
         Assert.Contains("  money: 0", text);
@@ -80,6 +80,23 @@ public sealed class TickReportPrinterTests
         Assert.DoesNotContain("Effort", text);
         Assert.DoesNotContain("Consumed", text);
         Assert.DoesNotContain("volume: 0 \u2192", text);
+    }
+
+    [Fact]
+    public void FormatScreen_MergeFixture_ShowsPrimaryAndSecondaryPorts()
+    {
+        var seed = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors);
+        var state = seed with
+        {
+            Graph = GraphFactory.CreateGraphWithMergeNode(),
+            Assignments = seed.Assignments.Add(
+                new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.MergeNodeId)),
+        };
+        var text = TickReportPrinter.FormatScreen(state, width: PanelLayout.DefaultWidth);
+
+        Assert.Contains("merge:", text);
+        Assert.Contains("  primary: 0", text);
+        Assert.Contains("  secondary: 0", text);
     }
 
     [Fact]

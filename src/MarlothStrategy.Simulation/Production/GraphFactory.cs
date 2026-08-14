@@ -5,15 +5,15 @@ namespace MarlothStrategy.Simulation.Production;
 
 /// <summary>
 /// Builds the magic-agency node catalog and graph from the essential baseline
-/// (including an enchant self-loop), optionally replacing that loop with the
-/// testing+merge variation.
+/// (including an enchant self-loop), optionally adding the testing variation
+/// that fans testing output back onto enchant alongside that self-loop.
 /// </summary>
 public static class GraphFactory
 {
-    public static (NodeGraph Graph, NodeTypeCatalog Catalog) Create(bool includeTestingMerge)
+    public static (NodeGraph Graph, NodeTypeCatalog Catalog) Create(bool includeTesting)
     {
         var catalog = CreateCatalog();
-        var graph = includeTestingMerge ? CreateTestingMergeGraph() : CreateEssentialGraph();
+        var graph = includeTesting ? CreateTestingGraph() : CreateEssentialGraph();
         return (graph, catalog);
     }
 
@@ -110,10 +110,56 @@ public static class GraphFactory
     }
 
     /// <summary>
-    /// Testing+merge variation: the essential <c>enchant→enchant</c> self-loop is replaced
-    /// by <c>enchant→merge.primary</c>; <c>enchant→sell</c> fans out through testing.
+    /// Testing variation: keep the enchant self-loop, insert testing between enchant and sell,
+    /// and fan testing output back onto enchant (port-level <c>+</c> with the self-loop).
     /// </summary>
-    public static NodeGraph CreateTestingMergeGraph()
+    public static NodeGraph CreateTestingGraph()
+    {
+        return new NodeGraph(
+            ImmutableDictionary<NodeId, Node>.Empty
+                .Add(MagicAgencySeed.EnchantNodeId, new Node(MagicAgencySeed.EnchantNodeId, MagicAgencySeed.EnchantTypeId))
+                .Add(MagicAgencySeed.TestingNodeId, new Node(MagicAgencySeed.TestingNodeId, MagicAgencySeed.TestingTypeId))
+                .Add(MagicAgencySeed.SellNodeId, new Node(MagicAgencySeed.SellNodeId, MagicAgencySeed.SellTypeId))
+                .Add(MagicAgencySeed.TreasuryNodeId, new Node(MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.TreasuryTypeId))
+                .Add(MagicAgencySeed.PayrollNodeId, new Node(MagicAgencySeed.PayrollNodeId, MagicAgencySeed.PayrollTypeId)),
+            ImmutableDictionary<EdgeId, Edge>.Empty
+                .Add(
+                    new EdgeId("enchantment-to-enchant"),
+                    new Edge(
+                        new PortReference(MagicAgencySeed.EnchantNodeId, MagicAgencySeed.EnchantmentPortId),
+                        new PortReference(MagicAgencySeed.EnchantNodeId, MagicAgencySeed.EnchantmentPortId)))
+                .Add(
+                    new EdgeId("enchantment-to-testing"),
+                    new Edge(
+                        new PortReference(MagicAgencySeed.EnchantNodeId, MagicAgencySeed.EnchantmentPortId),
+                        new PortReference(MagicAgencySeed.TestingNodeId, MagicAgencySeed.EnchantmentPortId)))
+                .Add(
+                    new EdgeId("testing-to-sell"),
+                    new Edge(
+                        new PortReference(MagicAgencySeed.TestingNodeId, MagicAgencySeed.EnchantmentPortId),
+                        new PortReference(MagicAgencySeed.SellNodeId, MagicAgencySeed.EnchantmentPortId)))
+                .Add(
+                    new EdgeId("testing-to-enchant"),
+                    new Edge(
+                        new PortReference(MagicAgencySeed.TestingNodeId, MagicAgencySeed.EnchantmentPortId),
+                        new PortReference(MagicAgencySeed.EnchantNodeId, MagicAgencySeed.EnchantmentPortId)))
+                .Add(
+                    new EdgeId("money-to-treasury"),
+                    new Edge(
+                        new PortReference(MagicAgencySeed.SellNodeId, MagicAgencySeed.MoneyPortId),
+                        new PortReference(MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId)))
+                .Add(
+                    new EdgeId("treasury-to-payroll"),
+                    new Edge(
+                        new PortReference(MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId),
+                        new PortReference(MagicAgencySeed.PayrollNodeId, MagicAgencySeed.MoneyPortId))));
+    }
+
+    /// <summary>
+    /// Graph that includes a merge node. Not used by scenarios; tests use it for merge
+    /// behavior and dual-port layout.
+    /// </summary>
+    public static NodeGraph CreateGraphWithMergeNode()
     {
         return new NodeGraph(
             ImmutableDictionary<NodeId, Node>.Empty

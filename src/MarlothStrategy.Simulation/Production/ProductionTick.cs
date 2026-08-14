@@ -33,11 +33,13 @@ public static class ProductionTick
             reportOrder,
             resolvedInputs,
             effortByNode);
+        var blocks = computed.EnchantmentBlocks.ToBuilder();
         var (nextSignals, pendingAfterCommit) = CommitSignals(
             state,
             computed.Residuals,
             computed.Outputs,
-            computed.PendingMoves);
+            computed.PendingMoves,
+            blocks);
         var nextTimers = AdvancePayrollTimer(state, computed.NextTimers);
 
         var nextState = state with
@@ -48,7 +50,7 @@ public static class ProductionTick
             PendingMoneyMoves = pendingAfterCommit,
             Actors = computed.NextActors,
             Assignments = computed.NextAssignments,
-            EnchantmentBlocks = computed.EnchantmentBlocks,
+            EnchantmentBlocks = blocks.ToImmutable(),
             NextUnitId = computed.NextUnitId,
             Tick = state.Tick + 1,
         };
@@ -714,13 +716,16 @@ public static class ProductionTick
         }
 
         nextProgress -= config.Effort;
-        var resolved = EnchantmentOps.ResolveMerge(
-            primary.Block,
-            secondary.Block,
+        var resolved = EnchantmentOps.TryCombine(
+            [primary.Block, secondary.Block],
             scratch.Blocks);
-        scratch.Register(resolved);
-        var produced = new SignalValue.Enchantment(resolved);
-        outputs[outputKey] = produced;
+        SignalValue.Enchantment? produced = null;
+        if (resolved is not null)
+        {
+            scratch.Register(resolved);
+            produced = new SignalValue.Enchantment(resolved);
+            outputs[outputKey] = produced;
+        }
 
         return new AppliedDraft(
             new NodeIoRow(
@@ -998,10 +1003,12 @@ public static class ProductionTick
             GameState state,
             ImmutableDictionary<PortKey, SignalValue> residuals,
             ImmutableDictionary<PortKey, SignalValue> outputs,
-            ImmutableArray<PendingMoneyMove> pending)
+            ImmutableArray<PendingMoneyMove> pending,
+            ImmutableDictionary<string, EnchantmentBlock>.Builder blocks)
     {
         var next = residuals.ToBuilder();
         var nextPending = pending;
+        var incoming = new Dictionary<PortKey, List<SignalValue>>();
 
         foreach (var edge in state.Graph.Edges.Values)
         {
@@ -1029,31 +1036,41 @@ public static class ProductionTick
                 continue;
             }
 
-            if (next.TryGetValue(toKey, out var existing))
+            if (!incoming.TryGetValue(toKey, out var routedValues))
             {
-                if (existing.TypeId != routed.TypeId)
+                routedValues = [];
+                incoming[toKey] = routedValues;
+            }
+
+            routedValues.Add(routed);
+        }
+
+        foreach (var (toKey, routedValues) in incoming)
+        {
+            var values = new List<SignalValue>(routedValues.Count + 1);
+            if (next.TryGetValue(toKey, out var residual))
+            {
+                if (residual.TypeId != routedValues[0].TypeId)
                 {
                     throw new InvalidOperationException(
-                        $"Signal type mismatch routing {fromKey} -> {toKey}: " +
-                        $"{routed.TypeId} vs {existing.TypeId}.");
+                        $"Signal type mismatch combining into {toKey}: " +
+                        $"{routedValues[0].TypeId} vs {residual.TypeId}.");
                 }
 
-                switch (routed.Kind)
-                {
-                    case SignalKind.Resource:
-                        next[toKey] = existing.AddResource(routed);
-                        break;
-                    case SignalKind.Information:
-                        // Occupancy: destination still has stock — skip this edge's copy.
-                        break;
-                    default:
-                        throw new InvalidOperationException(
-                            $"Unknown signal kind '{routed.Kind}'.");
-                }
+                values.Add(residual);
             }
-            else
+
+            values.AddRange(routedValues);
+            if (!SignalValue.TryCombine(values, blocks, out var combined))
             {
-                next[toKey] = routed;
+                next.Remove(toKey);
+                continue;
+            }
+
+            next[toKey] = combined;
+            if (combined is SignalValue.Enchantment enchantment)
+            {
+                blocks[enchantment.Block.Hash] = enchantment.Block;
             }
         }
 

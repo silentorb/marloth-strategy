@@ -106,7 +106,7 @@ public sealed record EnchantmentBlock(
     }
 }
 
-/// <summary>Pure helpers for mutate, testing reduction, ancestry, and three-way merge.</summary>
+/// <summary>Pure helpers for mutate, testing reduction, ancestry, and commutative combine.</summary>
 public static class EnchantmentOps
 {
     public static int UnitCount(double configValue) =>
@@ -236,56 +236,110 @@ public static class EnchantmentOps
     }
 
     /// <summary>
-    /// Resolves merge without allocating when fast-forward / same / incompatible.
-    /// When a three-way merge is required, creates a new block with primary as parent.
+    /// Combines enchantment histories. Returns <c>null</c> when the input set is empty
+    /// or any pair has no common ancestor (no value / empty port).
     /// </summary>
-    public static EnchantmentBlock ResolveMerge(
-        EnchantmentBlock primary,
-        EnchantmentBlock secondary,
+    public static EnchantmentBlock? TryCombine(
+        IReadOnlyList<EnchantmentBlock> inputs,
         IDictionary<string, EnchantmentBlock> blocks)
     {
-        ArgumentNullException.ThrowIfNull(primary);
-        ArgumentNullException.ThrowIfNull(secondary);
+        ArgumentNullException.ThrowIfNull(inputs);
         ArgumentNullException.ThrowIfNull(blocks);
 
-        if (primary.Hash == secondary.Hash)
+        var unique = new List<EnchantmentBlock>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var block in inputs)
         {
-            return primary;
+            ArgumentNullException.ThrowIfNull(block);
+            if (seen.Add(block.Hash))
+            {
+                unique.Add(block);
+            }
         }
 
-        if (IsAncestor(primary, secondary, blocks))
+        if (unique.Count == 0)
         {
-            return secondary;
+            return null;
         }
 
-        if (IsAncestor(secondary, primary, blocks))
+        if (unique.Count == 1)
         {
-            return primary;
+            return unique[0];
         }
 
-        var ancestor = FindCommonAncestor(primary, secondary, blocks);
-        if (ancestor is null)
+        for (var i = 0; i < unique.Count; i++)
         {
-            return primary;
+            for (var j = i + 1; j < unique.Count; j++)
+            {
+                if (FindCommonAncestor(unique[i], unique[j], blocks) is null)
+                {
+                    return null;
+                }
+            }
         }
 
-        return ThreeWayMerge(ancestor, primary, secondary);
+        foreach (var candidate in unique)
+        {
+            var isNewestTip = true;
+            foreach (var other in unique)
+            {
+                if (other.Hash == candidate.Hash)
+                {
+                    continue;
+                }
+
+                if (!IsAncestor(other, candidate, blocks))
+                {
+                    isNewestTip = false;
+                    break;
+                }
+            }
+
+            if (isNewestTip)
+            {
+                return candidate;
+            }
+        }
+
+        var ancestor = unique[0];
+        for (var i = 1; i < unique.Count; i++)
+        {
+            ancestor = FindCommonAncestor(ancestor, unique[i], blocks)
+                ?? throw new InvalidOperationException(
+                    "Expected a common ancestor after pairwise ancestry checks.");
+        }
+
+        var parentHash = unique
+            .Where(candidate => unique.All(other =>
+                other.Hash == candidate.Hash || !IsAncestor(candidate, other, blocks)))
+            .Select(tip => tip.Hash)
+            .Min(StringComparer.Ordinal)
+            ?? throw new InvalidOperationException("Expected at least one incomparable tip.");
+
+        return EnchantmentBlock.Create(
+            parentHash,
+            MergeUnits(ancestor.Volume, unique.Select(b => b.Volume).ToArray()),
+            MergeUnits(ancestor.Darkness, unique.Select(b => b.Darkness).ToArray()),
+            MergeUnits(ancestor.Fallacy, unique.Select(b => b.Fallacy).ToArray()));
     }
 
     public static EnchantmentBlock ThreeWayMerge(
         EnchantmentBlock ancestor,
-        EnchantmentBlock primary,
-        EnchantmentBlock secondary)
+        EnchantmentBlock left,
+        EnchantmentBlock right)
     {
         ArgumentNullException.ThrowIfNull(ancestor);
-        ArgumentNullException.ThrowIfNull(primary);
-        ArgumentNullException.ThrowIfNull(secondary);
+        ArgumentNullException.ThrowIfNull(left);
+        ArgumentNullException.ThrowIfNull(right);
 
+        var parentHash = string.CompareOrdinal(left.Hash, right.Hash) <= 0
+            ? left.Hash
+            : right.Hash;
         return EnchantmentBlock.Create(
-            primary.Hash,
-            MergeUnits(ancestor.Volume, primary.Volume, secondary.Volume),
-            MergeUnits(ancestor.Darkness, primary.Darkness, secondary.Darkness),
-            MergeUnits(ancestor.Fallacy, primary.Fallacy, secondary.Fallacy));
+            parentHash,
+            MergeUnits(ancestor.Volume, left.Volume, right.Volume),
+            MergeUnits(ancestor.Darkness, left.Darkness, right.Darkness),
+            MergeUnits(ancestor.Fallacy, left.Fallacy, right.Fallacy));
     }
 
     /// <summary>
@@ -293,28 +347,54 @@ public static class EnchantmentOps
     /// </summary>
     public static ImmutableArray<EnchantmentUnitId> MergeUnits(
         ImmutableArray<EnchantmentUnitId> ancestor,
-        ImmutableArray<EnchantmentUnitId> primary,
-        ImmutableArray<EnchantmentUnitId> secondary)
-    {
-        var a = ToSet(ancestor);
-        var p = ToSet(primary);
-        var s = ToSet(secondary);
+        ImmutableArray<EnchantmentUnitId> left,
+        ImmutableArray<EnchantmentUnitId> right) =>
+        MergeUnits(ancestor, [left, right]);
 
-        var result = new SortedSet<ulong>();
-        foreach (var id in p)
+    /// <summary>
+    /// Units in ancestor missing from any side are omitted; otherwise union of all sides.
+    /// </summary>
+    public static ImmutableArray<EnchantmentUnitId> MergeUnits(
+        ImmutableArray<EnchantmentUnitId> ancestor,
+        IReadOnlyList<ImmutableArray<EnchantmentUnitId>> sides)
+    {
+        ArgumentNullException.ThrowIfNull(sides);
+
+        var a = ToSet(ancestor);
+        var sets = new HashSet<EnchantmentUnitId>[sides.Count];
+        var union = new SortedSet<ulong>();
+        for (var i = 0; i < sides.Count; i++)
         {
-            if (!a.Contains(id) || s.Contains(id))
+            sets[i] = ToSet(sides[i]);
+            foreach (var id in sets[i])
             {
-                result.Add(id.Value);
+                union.Add(id.Value);
             }
         }
 
-        foreach (var id in s)
+        var result = new SortedSet<ulong>();
+        foreach (var value in union)
         {
-            if (!a.Contains(id) || p.Contains(id))
+            var id = new EnchantmentUnitId(value);
+            if (a.Contains(id))
             {
-                result.Add(id.Value);
+                var missingFromAny = false;
+                foreach (var set in sets)
+                {
+                    if (!set.Contains(id))
+                    {
+                        missingFromAny = true;
+                        break;
+                    }
+                }
+
+                if (missingFromAny)
+                {
+                    continue;
+                }
             }
+
+            result.Add(value);
         }
 
         return result.Select(v => new EnchantmentUnitId(v)).ToImmutableArray();

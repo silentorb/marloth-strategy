@@ -62,7 +62,7 @@ public static class ScenarioBootstrap
                 "Payroll period must be a positive integer.");
         }
 
-        var (graph, catalog) = GraphFactory.Create(spec.IncludeTestingMerge);
+        var (graph, catalog) = GraphFactory.Create(spec.IncludeTesting);
 
         var roster = ImmutableDictionary.CreateBuilder<ActorId, Actor>();
         foreach (var actorId in spec.ActorIds)

@@ -131,13 +131,13 @@ public static class ScenarioPresetLoader
             assignments.Add(new Assignment(new ActorId(row.ActorId), new NodeId(row.NodeId), row.Weight));
         }
 
-        return new ScenarioSpec(dto.IncludeTestingMerge, actorIds.ToImmutable(), assignments.ToImmutable());
+        return new ScenarioSpec(dto.IncludeTesting, actorIds.ToImmutable(), assignments.ToImmutable());
     }
 
     private sealed class ScenarioPresetDto
     {
         [JsonRequired]
-        public bool IncludeTestingMerge { get; init; }
+        public bool IncludeTesting { get; init; }
 
         [JsonRequired]
         public List<string> Actors { get; init; } = [];

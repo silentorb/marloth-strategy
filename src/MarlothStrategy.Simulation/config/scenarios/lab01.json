@@ -1,9 +1,8 @@
 {
-  "includeTestingMerge": true,
+  "includeTesting": true,
   "actors": ["intern", "boss"],
   "assignments": [
     { "actorId": "intern", "nodeId": "enchant", "weight": 1 },
-    { "actorId": "intern", "nodeId": "merge", "weight": 1 },
     { "actorId": "intern", "nodeId": "testing", "weight": 1 },
     { "actorId": "boss", "nodeId": "payroll", "weight": 1 },
     { "actorId": "boss", "nodeId": "sell", "weight": 1 },

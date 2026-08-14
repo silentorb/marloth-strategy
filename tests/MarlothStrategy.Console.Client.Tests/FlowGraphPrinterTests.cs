@@ -37,6 +37,17 @@ public sealed class FlowGraphPrinterTests
                         .Add(ActorStatKeys.Payroll, 10)
                         .Add(ActorStatKeys.Treasury, 10)));
 
+    private static GameState MergeFixture()
+    {
+        var seed = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors);
+        return seed with
+        {
+            Graph = GraphFactory.CreateGraphWithMergeNode(),
+            Assignments = seed.Assignments.Add(
+                new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.MergeNodeId)),
+        };
+    }
+
     [Fact]
     public void FormatLines_SeedGraph_ShowsBranchingSpatialLayout()
     {
@@ -46,28 +57,24 @@ public sealed class FlowGraphPrinterTests
 
         Assert.Contains("enchant", text);
         Assert.Contains("testing", text);
-        Assert.Contains("merge", text);
+        Assert.DoesNotContain("merge", text);
         Assert.Contains("sell", text);
         Assert.Contains("treasury", text);
         Assert.Contains("payroll", text);
 
-        Assert.DoesNotContain("merge → enchant", text);
         Assert.True(
             text.Contains('▼') || text.Contains('▲') || text.Contains('►') || text.Contains('◄'),
             "Expected at least one directed arrow glyph in the drawn graph.");
-
-        var testingLine = lines.First(l => l.Contains("testing", StringComparison.Ordinal));
-        var mergeLine = lines.First(l => l.Contains("merge", StringComparison.Ordinal));
-        Assert.NotEqual(
-            testingLine.IndexOf("testing", StringComparison.Ordinal),
-            mergeLine.IndexOf("merge", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void FormatLines_SeedGraph_MergeInputsArriveOnDistinctColumns()
+    public void FormatLines_MergeFixture_MergeInputsArriveOnDistinctColumns()
     {
-        var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors);
-        var lines = FlowGraphPrinter.FormatLines(state, maxWidth: 65);
+        var lines = FlowGraphPrinter.FormatLines(MergeFixture(), maxWidth: 65);
+        var text = string.Join('\n', lines);
+
+        Assert.Contains("merge", text);
+        Assert.DoesNotContain("merge → enchant", text);
 
         var mergeLineIdx = lines
             .Select((l, i) => (l, i))
@@ -101,7 +108,7 @@ public sealed class FlowGraphPrinterTests
     public void FormatLines_EssentialGraph_AnnotatesEnchantSelfLoop()
     {
         var spec = new ScenarioSpec(
-            IncludeTestingMerge: false,
+            IncludeTesting: false,
             ImmutableArray.Create(MagicAgencySeed.ActorId),
             ImmutableArray.Create(
                 new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.EnchantNodeId)));

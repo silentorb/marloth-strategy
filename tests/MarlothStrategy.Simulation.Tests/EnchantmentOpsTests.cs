@@ -65,7 +65,7 @@ public sealed class EnchantmentOpsTests
     }
 
     [Fact]
-    public void ResolveMerge_FastForwardsToDescendant()
+    public void TryCombine_FastForwardsToDescendant_EitherOrder()
     {
         var genesis = EnchantmentBlock.CreateGenesis();
         var (child, next) = EnchantmentOps.Mutate(genesis, EnchantConfig, 1);
@@ -77,14 +77,14 @@ public sealed class EnchantmentOpsTests
 
         Assert.Equal(
             grandchild,
-            EnchantmentOps.ResolveMerge(genesis, grandchild, blocks.ToBuilder()));
+            EnchantmentOps.TryCombine([genesis, grandchild], blocks.ToBuilder()));
         Assert.Equal(
             grandchild,
-            EnchantmentOps.ResolveMerge(grandchild, genesis, blocks.ToBuilder()));
+            EnchantmentOps.TryCombine([grandchild, genesis], blocks.ToBuilder()));
     }
 
     [Fact]
-    public void ResolveMerge_IncompatibleHistories_ReturnsPrimary()
+    public void TryCombine_IncompatibleHistories_ReturnsNull()
     {
         var (left, next) = EnchantmentOps.FromCounts(1, 0, 0, nextUnitId: 1);
         var (right, _) = EnchantmentOps.FromCounts(1, 0, 0, nextUnitId: next);
@@ -92,7 +92,63 @@ public sealed class EnchantmentOpsTests
             .Add(left.Hash, left)
             .Add(right.Hash, right);
 
-        Assert.Equal(left, EnchantmentOps.ResolveMerge(left, right, blocks.ToBuilder()));
+        Assert.Null(EnchantmentOps.TryCombine([left, right], blocks.ToBuilder()));
+        Assert.Null(EnchantmentOps.TryCombine([right, left], blocks.ToBuilder()));
+    }
+
+    [Fact]
+    public void TryCombine_AnyIncompatiblePair_ReturnsNull()
+    {
+        var genesis = EnchantmentBlock.CreateGenesis();
+        var (child, _) = EnchantmentOps.Mutate(genesis, EnchantConfig, 1);
+        var (unrelated, _) = EnchantmentOps.FromCounts(1, 0, 0, nextUnitId: 100);
+        var blocks = ImmutableDictionary<string, EnchantmentBlock>.Empty
+            .Add(genesis.Hash, genesis)
+            .Add(child.Hash, child)
+            .Add(unrelated.Hash, unrelated);
+
+        Assert.Null(EnchantmentOps.TryCombine([genesis, child, unrelated], blocks.ToBuilder()));
+    }
+
+    [Fact]
+    public void TryCombine_DivergentTips_IsCommutative()
+    {
+        var a1 = new EnchantmentUnitId(1);
+        var a2 = new EnchantmentUnitId(2);
+        var a3 = new EnchantmentUnitId(3);
+        var pOnly = new EnchantmentUnitId(10);
+        var sOnly = new EnchantmentUnitId(20);
+
+        var ancestor = EnchantmentBlock.Create(
+            null,
+            ImmutableArray.Create(a1, a2, a3),
+            ImmutableArray<EnchantmentUnitId>.Empty,
+            ImmutableArray<EnchantmentUnitId>.Empty);
+        var left = EnchantmentBlock.Create(
+            ancestor.Hash,
+            ImmutableArray.Create(a1, a3, pOnly),
+            ImmutableArray<EnchantmentUnitId>.Empty,
+            ImmutableArray<EnchantmentUnitId>.Empty);
+        var right = EnchantmentBlock.Create(
+            ancestor.Hash,
+            ImmutableArray.Create(a1, a2, sOnly),
+            ImmutableArray<EnchantmentUnitId>.Empty,
+            ImmutableArray<EnchantmentUnitId>.Empty);
+        var blocks = ImmutableDictionary<string, EnchantmentBlock>.Empty
+            .Add(ancestor.Hash, ancestor)
+            .Add(left.Hash, left)
+            .Add(right.Hash, right);
+
+        var ab = EnchantmentOps.TryCombine([left, right], blocks.ToBuilder());
+        var ba = EnchantmentOps.TryCombine([right, left], blocks.ToBuilder());
+        Assert.NotNull(ab);
+        Assert.NotNull(ba);
+        Assert.Equal(ab.Hash, ba.Hash);
+        Assert.Equal(new[] { 1UL, 10UL, 20UL }, ab.Volume.Select(u => u.Value).ToArray());
+        var expectedParent = string.CompareOrdinal(left.Hash, right.Hash) <= 0
+            ? left.Hash
+            : right.Hash;
+        Assert.Equal(expectedParent, ab.ParentHash);
     }
 
     [Fact]
@@ -109,20 +165,25 @@ public sealed class EnchantmentOpsTests
             ImmutableArray.Create(a1, a2, a3),
             ImmutableArray<EnchantmentUnitId>.Empty,
             ImmutableArray<EnchantmentUnitId>.Empty);
-        // Primary deleted a2; secondary deleted a3; both kept a1; each added new units.
-        var primary = EnchantmentBlock.Create(
+        // Left deleted a2; right deleted a3; both kept a1; each added new units.
+        var left = EnchantmentBlock.Create(
             ancestor.Hash,
             ImmutableArray.Create(a1, a3, pOnly),
             ImmutableArray<EnchantmentUnitId>.Empty,
             ImmutableArray<EnchantmentUnitId>.Empty);
-        var secondary = EnchantmentBlock.Create(
+        var right = EnchantmentBlock.Create(
             ancestor.Hash,
             ImmutableArray.Create(a1, a2, sOnly),
             ImmutableArray<EnchantmentUnitId>.Empty,
             ImmutableArray<EnchantmentUnitId>.Empty);
 
-        var merged = EnchantmentOps.ThreeWayMerge(ancestor, primary, secondary);
+        var merged = EnchantmentOps.ThreeWayMerge(ancestor, left, right);
+        var swapped = EnchantmentOps.ThreeWayMerge(ancestor, right, left);
         Assert.Equal(new[] { 1UL, 10UL, 20UL }, merged.Volume.Select(u => u.Value).ToArray());
-        Assert.Equal(primary.Hash, merged.ParentHash);
+        Assert.Equal(merged.Hash, swapped.Hash);
+        var expectedParent = string.CompareOrdinal(left.Hash, right.Hash) <= 0
+            ? left.Hash
+            : right.Hash;
+        Assert.Equal(expectedParent, merged.ParentHash);
     }
 }

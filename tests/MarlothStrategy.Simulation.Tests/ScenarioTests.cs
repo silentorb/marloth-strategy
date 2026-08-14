@@ -29,22 +29,22 @@ public sealed class ScenarioTests
             DefaultConfigs,
             actors);
 
-        Assert.Equal(6, state.Graph.Nodes.Count);
-        Assert.Equal(7, state.Graph.Edges.Count);
+        Assert.Equal(5, state.Graph.Nodes.Count);
+        Assert.Equal(6, state.Graph.Edges.Count);
         Assert.True(state.Graph.Nodes.ContainsKey(MagicAgencySeed.TestingNodeId));
-        Assert.True(state.Graph.Nodes.ContainsKey(MagicAgencySeed.MergeNodeId));
+        Assert.False(state.Graph.Nodes.ContainsKey(MagicAgencySeed.MergeNodeId));
         Assert.Contains(
             state.Graph.Edges.Values,
             e => e.From.Node == MagicAgencySeed.EnchantNodeId
                  && e.To.Node == MagicAgencySeed.TestingNodeId);
-        Assert.DoesNotContain(
+        Assert.Contains(
             state.Graph.Edges.Values,
             e => e.From.Node == MagicAgencySeed.EnchantNodeId
-                 && e.To.Node == MagicAgencySeed.SellNodeId);
+                 && e.To.Node == MagicAgencySeed.EnchantNodeId);
 
         Assert.Equal(2, state.Actors.Count);
         Assert.False(state.Actors.ContainsKey(ConsultantId));
-        Assert.Equal(6, state.Assignments.Length);
+        Assert.Equal(5, state.Assignments.Length);
         Assert.All(state.Assignments, a => Assert.Equal(1m, a.Weight));
         Assert.Equal(100, Assert.IsType<SignalValue.Money>(
             state.PortSignals[new PortKey(MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId)]).Amount);
@@ -74,7 +74,7 @@ public sealed class ScenarioTests
     [Fact]
     public void GraphFactory_Essential_HasEnchantSelfLoopAndSellWithoutTestingMerge()
     {
-        var (graph, catalog) = GraphFactory.Create(includeTestingMerge: false);
+        var (graph, catalog) = GraphFactory.Create(includeTesting: false);
 
         Assert.Equal(4, graph.Nodes.Count);
         Assert.False(graph.Nodes.ContainsKey(MagicAgencySeed.TestingNodeId));
@@ -101,25 +101,31 @@ public sealed class ScenarioTests
     }
 
     [Fact]
-    public void GraphFactory_TestingMerge_ReplacesEnchantSelfLoopWithEnchantToMerge()
+    public void GraphFactory_Testing_KeepsEnchantSelfLoopAndAddsTestingFanIn()
     {
-        var (graph, _) = GraphFactory.Create(includeTestingMerge: true);
+        var (graph, catalog) = GraphFactory.Create(includeTesting: true);
 
-        Assert.Equal(6, graph.Nodes.Count);
-        Assert.Equal(7, graph.Edges.Count);
-        Assert.DoesNotContain(
+        Assert.Equal(5, graph.Nodes.Count);
+        Assert.Equal(6, graph.Edges.Count);
+        Assert.True(graph.Nodes.ContainsKey(MagicAgencySeed.TestingNodeId));
+        Assert.False(graph.Nodes.ContainsKey(MagicAgencySeed.MergeNodeId));
+        Assert.Contains(
             graph.Edges.Values,
             e => e.From.Node == MagicAgencySeed.EnchantNodeId
                  && e.To.Node == MagicAgencySeed.EnchantNodeId);
         Assert.Contains(
             graph.Edges.Values,
             e => e.From.Node == MagicAgencySeed.EnchantNodeId
-                 && e.To.Node == MagicAgencySeed.MergeNodeId
-                 && e.To.Port == MagicAgencySeed.PrimaryPortId);
+                 && e.To.Node == MagicAgencySeed.TestingNodeId);
+        Assert.Contains(
+            graph.Edges.Values,
+            e => e.From.Node == MagicAgencySeed.TestingNodeId
+                 && e.To.Node == MagicAgencySeed.EnchantNodeId);
         Assert.DoesNotContain(
             graph.Edges.Values,
             e => e.From.Node == MagicAgencySeed.EnchantNodeId
                  && e.To.Node == MagicAgencySeed.SellNodeId);
+        Assert.True(catalog.Types.ContainsKey(MagicAgencySeed.MergeTypeId));
     }
 
     [Fact]
@@ -143,7 +149,7 @@ public sealed class ScenarioTests
         var first = ScenarioGenerator.Generate(42, pool);
         var second = ScenarioGenerator.Generate(42, pool);
 
-        Assert.Equal(first.IncludeTestingMerge, second.IncludeTestingMerge);
+        Assert.Equal(first.IncludeTesting, second.IncludeTesting);
         Assert.Equal(first.ActorIds.ToArray(), second.ActorIds.ToArray());
         Assert.Equal(first.Assignments.ToArray(), second.Assignments.ToArray());
         Assert.InRange(first.ActorIds.Length, 2, 4);
@@ -237,7 +243,7 @@ public sealed class ScenarioTests
         var state = ScenarioBootstrap.CreateInitialState(config, DefaultConfigs, actors, pool);
         var spec = ScenarioGenerator.Generate(7, pool);
 
-        Assert.Equal(spec.IncludeTestingMerge, state.Graph.Nodes.ContainsKey(MagicAgencySeed.TestingNodeId));
+        Assert.Equal(spec.IncludeTesting, state.Graph.Nodes.ContainsKey(MagicAgencySeed.TestingNodeId));
         Assert.Equal(spec.ActorIds.Length, state.Actors.Count);
         Assert.Equal(spec.Assignments.ToArray(), state.Assignments.ToArray());
         Assert.DoesNotContain(ConsultantId, state.Actors.Keys);
@@ -251,7 +257,7 @@ public sealed class ScenarioTests
         var config = new GameConfig { ScenarioPreset = "lab01", ScenarioSeed = 99 };
         var state = ScenarioBootstrap.CreateInitialState(config, DefaultConfigs, actors, pool);
 
-        Assert.Equal(6, state.Graph.Nodes.Count);
+        Assert.Equal(5, state.Graph.Nodes.Count);
         Assert.Equal(2, state.Actors.Count);
         Assert.Contains(state.Actors.Keys, id => id == MagicAgencySeed.ActorId);
         Assert.Contains(state.Actors.Keys, id => id == MagicAgencySeed.BossActorId);
@@ -283,7 +289,7 @@ public sealed class ScenarioTests
                 Capacity: 1.0m,
                 ImmutableDictionary<string, double>.Empty));
         var spec = new ScenarioSpec(
-            IncludeTestingMerge: false,
+            IncludeTesting: false,
             ImmutableArray.Create(MagicAgencySeed.ActorId),
             ImmutableArray.Create(new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.TestingNodeId)));
 
@@ -296,7 +302,7 @@ public sealed class ScenarioTests
     public void Materialize_MissingActor_FailsFast()
     {
         var spec = new ScenarioSpec(
-            IncludeTestingMerge: false,
+            IncludeTesting: false,
             ImmutableArray.Create(new ActorId("ghost")),
             ImmutableArray.Create(new Assignment(new ActorId("ghost"), MagicAgencySeed.EnchantNodeId)));
 
@@ -337,14 +343,14 @@ public sealed class ScenarioTests
 
     private static void AssertEveryNodeCovered(ScenarioSpec spec)
     {
-        var (graph, _) = GraphFactory.Create(spec.IncludeTestingMerge);
+        var (graph, _) = GraphFactory.Create(spec.IncludeTesting);
         Assert.All(
             graph.Nodes.Keys,
             nodeId => Assert.Contains(spec.Assignments, a => a.NodeId == nodeId));
     }
 
     private static bool SpecsEqual(ScenarioSpec a, ScenarioSpec b) =>
-        a.IncludeTestingMerge == b.IncludeTestingMerge
+        a.IncludeTesting == b.IncludeTesting
         && a.ActorIds.SequenceEqual(b.ActorIds)
         && a.Assignments.SequenceEqual(b.Assignments);
 }
