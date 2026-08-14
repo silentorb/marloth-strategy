@@ -63,13 +63,14 @@ public sealed class TickReportPrinterTests
         Assert.Contains("    volume: 0", text);
         Assert.Contains("    darkness: 0", text);
         Assert.Contains("    fallacy: 0", text);
-        Assert.Contains("  progress: 0 / 10", text);
+        Assert.Contains("  cycles: 0", text);
         Assert.Contains("testing:", text);
         Assert.DoesNotContain("merge:", text);
         Assert.DoesNotContain("  primary: 0", text);
         Assert.DoesNotContain("  secondary: 0", text);
         Assert.Contains("payroll:", text);
-        Assert.Contains("  timer: 0 / 5", text);
+        Assert.DoesNotContain("  timer:", text);
+        Assert.DoesNotContain("  progress:", text);
         Assert.Contains("  money: 0", text);
         Assert.Contains("sell:", text);
         Assert.Contains("  enchantment: 0", text);
@@ -115,7 +116,7 @@ public sealed class TickReportPrinterTests
 
         Assert.Contains("design:", text);
         Assert.Contains("  designs: 0", text);
-        Assert.Contains("  progress: 0 / 3", text);
+        Assert.Contains("  cycles: 0", text);
         Assert.DoesNotContain("testing:", text);
     }
 
@@ -148,7 +149,9 @@ public sealed class TickReportPrinterTests
         Assert.Contains("Tick 1", normalized);
         Assert.Contains("actors: boss, intern", normalized);
         Assert.Contains("volume: 0 \u2192 10", normalized);
-        Assert.Contains("timer: 0 \u2192 1 / 5", normalized);
+        Assert.Contains("cycles: 0 \u2192 1", normalized);
+        Assert.DoesNotContain("timer:", normalized);
+        Assert.DoesNotContain("progress:", normalized);
         Assert.Contains("treasury:", normalized);
         Assert.Contains("  money: 100", normalized);
         Assert.DoesNotContain("money: 100 \u2192 80", text);
@@ -179,6 +182,11 @@ public sealed class TickReportPrinterTests
                 .Add(MagicAgencySeed.TreasuryNodeId, 1)
                 .Add(MagicAgencySeed.PayrollNodeId, 2),
             NodeTimers = previous.NodeTimers.SetItem(MagicAgencySeed.PayrollNodeId, 1),
+            NodeCycles = ImmutableDictionary<NodeId, int>.Empty
+                .Add(MagicAgencySeed.SellNodeId, 1)
+                .Add(MagicAgencySeed.TreasuryNodeId, 2)
+                .Add(MagicAgencySeed.PayrollNodeId, 1)
+                .Add(MagicAgencySeed.EnchantNodeId, 1),
             Actors = ImmutableDictionary<ActorId, Actor>.Empty,
             Assignments = ImmutableArray<Assignment>.Empty,
         };
@@ -188,15 +196,52 @@ public sealed class TickReportPrinterTests
 
         Assert.Contains("actors: boss, intern \u2192 0", normalized);
         Assert.Contains("money: 100 \u2192 80", normalized);
-        Assert.Contains("progress: 0 \u2192 1 / 1", normalized);
+        Assert.Contains("cycles: 0 \u2192 2", normalized);
         Assert.Contains("volume: 0 \u2192 10", text);
         Assert.Contains("darkness: 0 \u2192 1", text);
         Assert.Contains("fallacy: 0 \u2192 1", text);
-        Assert.Contains("progress: 0 \u2192 5 / 10", text);
-        Assert.Contains("timer: 0 \u2192 1 / 5", normalized);
-        Assert.Contains("progress: 0 \u2192 2 / 1", normalized);
+        Assert.Contains("cycles: 0 \u2192 1", text);
+        Assert.DoesNotContain("timer:", normalized);
+        Assert.DoesNotContain("progress:", normalized);
         Assert.Contains($"hash: {EnchantmentBlock.CreateGenesis().AbbreviatedHash} \u2192 {block.AbbreviatedHash}", text);
     }
+
+    [Fact]
+    public void FormatScreen_WithBaseline_ShowsSignedDeltaColumn()
+    {
+        var baseline = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors);
+        var current = baseline with
+        {
+            Tick = 2,
+            PortSignals = baseline.PortSignals
+                .SetItem(
+                    new PortKey(MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId),
+                    new SignalValue.Money(109)),
+            NodeCycles = ImmutableDictionary<NodeId, int>.Empty
+                .Add(MagicAgencySeed.EnchantNodeId, 1),
+        };
+
+        var text = TickReportPrinter.FormatScreen(
+            current,
+            previous: baseline,
+            width: PanelLayout.DefaultWidth,
+            baseline: baseline);
+        var normalized = text.Replace("\r\n", "\n");
+
+        Assert.Contains(DeltaCaptionInPanel(), normalized);
+        Assert.Contains("+9", normalized);
+        Assert.Contains("money: 100 \u2192 109", normalized);
+        Assert.Contains("cycles: 0 \u2192 1", normalized);
+        // Three columns: state | Δ | assignments separated by single verticals inside left subpanels.
+        Assert.Contains($"{BoxDrawing.SingleVertical}", normalized);
+        var treasuryLine = normalized.Split('\n').First(l => l.Contains("money: 100 \u2192 109"));
+        Assert.Contains("+9", treasuryLine);
+        Assert.True(
+            treasuryLine.Count(c => c == BoxDrawing.SingleVertical) >= 2,
+            $"Expected at least two column separators on treasury money row: {treasuryLine}");
+    }
+
+    private static string DeltaCaptionInPanel() => "\u0394";
 
     [Fact]
     public void FormatSignal_IncludesAbbreviatedHashAndCounts()

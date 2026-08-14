@@ -12,6 +12,7 @@ public sealed record GameState(
     NodeTypeConfigs NodeConfigs,
     ImmutableDictionary<NodeId, double> NodeProgress,
     ImmutableDictionary<NodeId, int> NodeTimers,
+    ImmutableDictionary<NodeId, int> NodeCycles,
     ImmutableArray<PendingMoneyMove> PendingMoneyMoves,
     ImmutableDictionary<string, EnchantmentBlock> EnchantmentBlocks,
     ulong NextUnitId,

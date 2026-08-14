@@ -5,7 +5,7 @@ public static class PanelLayout
 {
     public const int DefaultWidth = 120;
 
-    /// <summary>Left column interior width for a left:right = 1:2 bottom split.</summary>
+    /// <summary>Left column interior width for a left:right = 1:1 bottom split.</summary>
     public static int LeftInteriorWidthForTotal(int totalWidth)
     {
         if (totalWidth < 10)
@@ -13,7 +13,7 @@ public static class PanelLayout
             throw new ArgumentOutOfRangeException(nameof(totalWidth), totalWidth, "totalWidth must be at least 10.");
         }
 
-        var left = Math.Max(1, (totalWidth - 3) / 3);
+        var left = Math.Max(1, (totalWidth - 3) / 2);
         var maxLeft = totalWidth - 5;
         return left > maxLeft ? maxLeft : left;
     }

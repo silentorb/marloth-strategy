@@ -47,6 +47,7 @@ public static class ProductionTick
             PortSignals = nextSignals,
             NodeProgress = computed.NextProgress,
             NodeTimers = nextTimers,
+            NodeCycles = computed.NextCycles,
             PendingMoneyMoves = pendingAfterCommit,
             Actors = computed.NextActors,
             Assignments = computed.NextAssignments,
@@ -265,6 +266,7 @@ public static class ProductionTick
         ImmutableArray<NodeIoRow> Rows,
         ImmutableDictionary<NodeId, double> NextProgress,
         ImmutableDictionary<NodeId, int> NextTimers,
+        ImmutableDictionary<NodeId, int> NextCycles,
         ImmutableArray<PendingMoneyMove> PendingMoves,
         ImmutableDictionary<ActorId, Actor> NextActors,
         ImmutableArray<Assignment> NextAssignments,
@@ -297,6 +299,7 @@ public static class ProductionTick
         var residuals = ImmutableDictionary.CreateBuilder<PortKey, SignalValue>();
         var outputs = ImmutableDictionary.CreateBuilder<PortKey, SignalValue>();
         var nextProgress = ImmutableDictionary.CreateBuilder<NodeId, double>();
+        var nextCycles = ImmutableDictionary.CreateBuilder<NodeId, int>();
         var rowByNode = new Dictionary<NodeId, NodeIoRow>();
         // Treasury drains only the start-of-tick queue; same-tick enqueues append after.
         var remainingStartPending = state.PendingMoneyMoves;
@@ -311,6 +314,7 @@ public static class ProductionTick
             var node = state.Graph.Nodes[nodeId];
             var effort = effortByNode.GetValueOrDefault(nodeId, 0m);
             var progress = state.NodeProgress.GetValueOrDefault(nodeId, 0);
+            var priorCycles = state.NodeCycles.GetValueOrDefault(nodeId, 0);
 
             if (node.Type == MagicAgencySeed.EnchantTypeId)
             {
@@ -327,6 +331,7 @@ public static class ProductionTick
                     scratch);
                 rowByNode[nodeId] = applied.Row;
                 nextProgress[nodeId] = applied.Progress;
+                nextCycles[nodeId] = priorCycles + applied.Applications;
             }
             else if (node.Type == MagicAgencySeed.DesignTypeId)
             {
@@ -341,6 +346,7 @@ public static class ProductionTick
                     outputs);
                 rowByNode[nodeId] = applied.Row;
                 nextProgress[nodeId] = applied.Progress;
+                nextCycles[nodeId] = priorCycles + applied.Applications;
             }
             else if (node.Type == MagicAgencySeed.TestingTypeId)
             {
@@ -357,6 +363,7 @@ public static class ProductionTick
                     scratch);
                 rowByNode[nodeId] = applied.Row;
                 nextProgress[nodeId] = applied.Progress;
+                nextCycles[nodeId] = priorCycles + applied.Applications;
             }
             else if (node.Type == MagicAgencySeed.MergeTypeId)
             {
@@ -373,6 +380,7 @@ public static class ProductionTick
                     scratch);
                 rowByNode[nodeId] = applied.Row;
                 nextProgress[nodeId] = applied.Progress;
+                nextCycles[nodeId] = priorCycles + applied.Applications;
             }
             else if (node.Type == MagicAgencySeed.SellTypeId)
             {
@@ -388,6 +396,7 @@ public static class ProductionTick
                     outputs);
                 rowByNode[nodeId] = applied.Row;
                 nextProgress[nodeId] = applied.Progress;
+                nextCycles[nodeId] = priorCycles + applied.Applications;
             }
             else if (node.Type == MagicAgencySeed.TreasuryTypeId)
             {
@@ -404,6 +413,7 @@ public static class ProductionTick
                     nextActors,
                     nextAssignments);
                 nextProgress[nodeId] = applied.Progress;
+                nextCycles[nodeId] = priorCycles + applied.Applications;
                 remainingStartPending = applied.PendingMoves;
                 nextActors = applied.Actors;
                 nextAssignments = applied.Assignments;
@@ -420,6 +430,7 @@ public static class ProductionTick
                     appendedPending,
                     nextTimers);
                 nextProgress[nodeId] = applied.Progress;
+                nextCycles[nodeId] = priorCycles + applied.Applications;
                 appendedPending = applied.PendingMoves;
                 nextTimers = applied.Timers;
             }
@@ -434,6 +445,14 @@ public static class ProductionTick
             if (!nextProgress.ContainsKey(id))
             {
                 nextProgress[id] = value;
+            }
+        }
+
+        foreach (var (id, value) in state.NodeCycles)
+        {
+            if (!nextCycles.ContainsKey(id))
+            {
+                nextCycles[id] = value;
             }
         }
 
@@ -453,6 +472,7 @@ public static class ProductionTick
             rows.ToImmutable(),
             nextProgress.ToImmutable(),
             nextTimers,
+            nextCycles.ToImmutable(),
             pending,
             nextActors,
             nextAssignments,
@@ -460,7 +480,7 @@ public static class ProductionTick
             scratch.NextUnitId);
     }
 
-    private readonly record struct AppliedDraft(NodeIoRow Row, double Progress);
+    private readonly record struct AppliedDraft(NodeIoRow Row, double Progress, int Applications = 0);
 
     private static AppliedDraft ApplyEnchant(
         GameState state,
@@ -529,6 +549,7 @@ public static class ProductionTick
 
         var currentBlock = starting.Block;
         var mutated = false;
+        var applications = 0;
         while (true)
         {
             var required = config.Effort + currentBlock.DarknessCount;
@@ -538,6 +559,7 @@ public static class ProductionTick
             }
 
             nextProgress -= required;
+            applications++;
             var designsForThis = mutated ? 0 : designsCount;
             var (nextBlock, nextUnitId) = EnchantmentOps.Mutate(
                 currentBlock,
@@ -570,7 +592,8 @@ public static class ProductionTick
                 enchantmentPort,
                 SignalTypes.Enchantment,
                 current),
-            nextProgress);
+            nextProgress,
+            applications);
     }
 
     private static void ResidualDesigns(
@@ -654,7 +677,8 @@ public static class ProductionTick
                 designsPort,
                 SignalTypes.Designs,
                 produced),
-            nextProgress);
+            nextProgress,
+            granted);
     }
 
     private static AppliedDraft ApplyTesting(
@@ -716,9 +740,11 @@ public static class ProductionTick
         var actorCount = CountEffectiveActorsOnNode(state, nodeId, resolvedInputs);
         var reductionPerApplication = EnchantmentOps.UnitCount(config.FallacyReduction) * actorCount;
         var currentBlock = starting.Block;
+        var applications = 0;
         while (config.Effort > 0 && nextProgress >= config.Effort)
         {
             nextProgress -= config.Effort;
+            applications++;
             var reduced = EnchantmentOps.ReduceFallacy(currentBlock, reductionPerApplication);
             if (!ReferenceEquals(reduced, currentBlock) && reduced.Hash != currentBlock.Hash)
             {
@@ -742,7 +768,8 @@ public static class ProductionTick
                 enchantmentPort,
                 SignalTypes.Enchantment,
                 current),
-            nextProgress);
+            nextProgress,
+            applications);
     }
 
     private static AppliedDraft ApplyMerge(
@@ -860,7 +887,8 @@ public static class ProductionTick
                 outputPort,
                 SignalTypes.Enchantment,
                 produced),
-            nextProgress);
+            nextProgress,
+            Applications: 1);
     }
 
     private static AppliedDraft ApplySell(
@@ -922,7 +950,8 @@ public static class ProductionTick
                     moneyPort,
                     SignalTypes.Money,
                     produced),
-                progressAfterGain - config.Effort);
+                progressAfterGain - config.Effort,
+                Applications: 1);
         }
 
         if (available is not null)
@@ -949,7 +978,8 @@ public static class ProductionTick
         double Progress,
         ImmutableArray<PendingMoneyMove> PendingMoves,
         ImmutableDictionary<ActorId, Actor> Actors,
-        ImmutableArray<Assignment> Assignments);
+        ImmutableArray<Assignment> Assignments,
+        int Applications);
 
     private static TreasuryApplied ApplyTreasury(
         GameState state,
@@ -978,6 +1008,7 @@ public static class ProductionTick
         var nextActors = actors;
         var nextAssignments = assignments;
         var emittedOut = 0.0;
+        var applications = 0;
 
         if (assignmentEffort > 0m && !startQueue.IsEmpty)
         {
@@ -992,6 +1023,7 @@ public static class ProductionTick
             while (config.Effort > 0 && nextProgress >= config.Effort && !queue.IsEmpty)
             {
                 nextProgress -= config.Effort;
+                applications++;
                 var move = queue[0];
                 queue = queue.RemoveAt(0);
 
@@ -1027,13 +1059,14 @@ public static class ProductionTick
             outputs[moneyKey] = new SignalValue.Money(emittedOut);
         }
 
-        return new TreasuryApplied(nextProgress, nextPending, nextActors, nextAssignments);
+        return new TreasuryApplied(nextProgress, nextPending, nextActors, nextAssignments, applications);
     }
 
     private sealed record PayrollApplied(
         double Progress,
         ImmutableArray<PendingMoneyMove> PendingMoves,
-        ImmutableDictionary<NodeId, int> Timers);
+        ImmutableDictionary<NodeId, int> Timers,
+        int Applications);
 
     private static PayrollApplied ApplyPayroll(
         GameState state,
@@ -1050,6 +1083,7 @@ public static class ProductionTick
         var nextProgress = progress;
         var nextPending = appendedPending;
         var nextTimers = timers;
+        var applications = 0;
 
         // Payday due only when start-of-tick elapsed has reached period.
         if (elapsed >= config.Period && assignmentEffort > 0m)
@@ -1065,6 +1099,7 @@ public static class ProductionTick
             {
                 // One payday per due period: clear progress so excess gain does not carry.
                 nextProgress = 0;
+                applications = 1;
                 var wageTotal = 0.0;
                 foreach (var actor in state.Actors.Values.OrderBy(a => a.Id.Value, StringComparer.Ordinal))
                 {
@@ -1087,7 +1122,7 @@ public static class ProductionTick
             }
         }
 
-        return new PayrollApplied(nextProgress, nextPending, nextTimers);
+        return new PayrollApplied(nextProgress, nextPending, nextTimers, applications);
     }
 
     /// <summary>

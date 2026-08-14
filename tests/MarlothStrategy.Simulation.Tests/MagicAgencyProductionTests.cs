@@ -285,11 +285,32 @@ public sealed class MagicAgencyProductionTests
             new SignalValue.Designs(1),
             Signal(next, MagicAgencySeed.EnchantNodeId, MagicAgencySeed.DesignsPortId));
         Assert.Equal(0, next.NodeProgress[MagicAgencySeed.DesignNodeId]);
+        Assert.Equal(1, next.NodeCycles.GetValueOrDefault(MagicAgencySeed.DesignNodeId, 0));
+        Assert.Equal(0, next.NodeCycles.GetValueOrDefault(MagicAgencySeed.SellNodeId, 0));
 
         var design = Row(result, MagicAgencySeed.DesignNodeId);
         Assert.Equal(1.0m, design.Effort);
         Assert.Equal(new SignalValue.Designs(1), design.Produced);
         Assert.False(design.Consumed);
+    }
+
+    [Fact]
+    public void Design_TwoApplicationsInOneTick_IncrementsCyclesByTwo()
+    {
+        var actors = ImmutableDictionary<ActorId, Actor>.Empty.Add(
+            MagicAgencySeed.ActorId,
+            new Actor(
+                MagicAgencySeed.ActorId,
+                Capacity: 1.0m,
+                ImmutableDictionary<string, double>.Empty.Add(ActorStatKeys.Designing, 6)));
+
+        var state = DesignScenario(actors, MagicAgencySeed.ActorId);
+        var next = ProductionTick.AdvanceTick(state);
+
+        Assert.Equal(
+            new SignalValue.Designs(2),
+            Signal(next, MagicAgencySeed.EnchantNodeId, MagicAgencySeed.DesignsPortId));
+        Assert.Equal(2, next.NodeCycles.GetValueOrDefault(MagicAgencySeed.DesignNodeId, 0));
     }
 
     [Fact]
@@ -309,6 +330,7 @@ public sealed class MagicAgencyProductionTests
             next.PortSignals.ContainsKey(
                 new PortKey(MagicAgencySeed.EnchantNodeId, MagicAgencySeed.DesignsPortId)));
         Assert.Equal(2, next.NodeProgress[MagicAgencySeed.DesignNodeId]);
+        Assert.Equal(0, next.NodeCycles.GetValueOrDefault(MagicAgencySeed.DesignNodeId, 0));
     }
 
     [Fact]
@@ -666,6 +688,7 @@ public sealed class MagicAgencyProductionTests
         var afterPayday = ProductionTick.AdvanceTick(afterCountdown);
         Assert.Equal(0, afterPayday.NodeTimers[MagicAgencySeed.PayrollNodeId]);
         Assert.Equal(0, afterPayday.NodeProgress.GetValueOrDefault(MagicAgencySeed.PayrollNodeId, 0));
+        Assert.Equal(1, afterPayday.NodeCycles.GetValueOrDefault(MagicAgencySeed.PayrollNodeId, 0));
         Assert.Single(afterPayday.PendingMoneyMoves);
         Assert.Equal(MoneyMoveDirection.Out, afterPayday.PendingMoneyMoves[0].Direction);
         Assert.Equal(10, afterPayday.PendingMoneyMoves[0].Amount);

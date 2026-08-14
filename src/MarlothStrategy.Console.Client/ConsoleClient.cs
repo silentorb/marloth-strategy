@@ -10,7 +10,8 @@ public static class ConsoleClient
         ArgumentNullException.ThrowIfNull(config);
 
         var state = ScenarioBootstrap.CreateInitialState(config);
-        DrawReport(state, config);
+        var baseline = state;
+        DrawReport(state, config, baseline);
 
         while (true)
         {
@@ -22,14 +23,14 @@ public static class ConsoleClient
                     System.Console.WriteLine("Exiting.");
                     return;
                 case PromptAction.Unknown:
-                    DrawReport(state, config);
+                    DrawReport(state, config, baseline);
                     System.Console.WriteLine("Unknown input. Press Enter for next tick, or q to quit.");
                     continue;
                 case PromptAction.Advance:
                     var previous = state;
                     var result = ProductionTick.AdvanceTickWithReport(state);
                     state = result.State;
-                    DrawReport(state, config, previous, result);
+                    DrawReport(state, config, baseline, previous, result);
                     break;
             }
         }
@@ -38,12 +39,14 @@ public static class ConsoleClient
     private static void DrawReport(
         GameState state,
         GameConfig config,
+        GameState baseline,
         GameState? previous = null,
         ProductionTickResult? tick = null)
     {
         TryClear();
         var width = ResolveWidth();
-        System.Console.WriteLine(TickReportPrinter.FormatScreen(state, previous, tick, width, config));
+        System.Console.WriteLine(
+            TickReportPrinter.FormatScreen(state, previous, tick, width, config, baseline));
         System.Console.WriteLine();
     }
 

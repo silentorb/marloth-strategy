@@ -9,14 +9,18 @@ namespace MarlothStrategy.Console.Client;
 public static class TickReportPrinter
 {
     private const char Arrow = '\u2192';
+    private const string DeltaCaption = "\u0394";
     public const string Title = "Marloth Strategy";
+
+    private readonly record struct NodeStateRow(string Text, string Delta);
 
     public static string FormatScreen(
         GameState state,
         GameState? previous = null,
         ProductionTickResult? tick = null,
         int width = PanelLayout.DefaultWidth,
-        GameConfig? config = null)
+        GameConfig? config = null,
+        GameState? baseline = null)
     {
         ArgumentNullException.ThrowIfNull(state);
         _ = tick;
@@ -42,7 +46,7 @@ public static class TickReportPrinter
             .OrderBy(id => id.Value, StringComparer.Ordinal)
             .ToArray();
 
-        // Left:right interior = 1:2 so the flow graph has more horizontal room.
+        // Left:right interior = 1:1 bottom split.
         var leftInteriorWidth = PanelLayout.LeftInteriorWidthForTotal(width);
         // WritePadded reserves one cell of left margin inside the column.
         var usableLeftWidth = Math.Max(1, leftInteriorWidth - 1);
@@ -50,7 +54,7 @@ public static class TickReportPrinter
         var leftSubpanels = new List<IReadOnlyList<string>>(nodes.Length);
         foreach (var nodeId in nodes)
         {
-            leftSubpanels.Add(FormatNodeLines(state, previous, nodeId, usableLeftWidth));
+            leftSubpanels.Add(FormatNodeLines(state, previous, baseline, nodeId, usableLeftWidth));
         }
 
         var rightInteriorWidth = width - leftInteriorWidth - 3;
@@ -103,20 +107,25 @@ public static class TickReportPrinter
     private static List<string> FormatNodeLines(
         GameState state,
         GameState? previous,
+        GameState? baseline,
         NodeId nodeId,
         int usableWidth)
     {
-        var stateLines = FormatNodeStateLines(state, previous, nodeId);
+        var stateRows = FormatNodeStateRows(state, previous, baseline, nodeId);
         var assignmentLines = FormatNodeAssignmentLines(state, nodeId);
-        return MergeNodeColumns(stateLines, assignmentLines, usableWidth);
+        return MergeNodeColumns(stateRows, assignmentLines, usableWidth, includeDelta: baseline is not null);
     }
 
-    private static List<string> FormatNodeStateLines(
+    private static List<NodeStateRow> FormatNodeStateRows(
         GameState state,
         GameState? previous,
+        GameState? baseline,
         NodeId nodeId)
     {
-        var lines = new List<string> { $"{nodeId.Value}:" };
+        var rows = new List<NodeStateRow>
+        {
+            new($"{nodeId.Value}:", baseline is null ? string.Empty : DeltaCaption),
+        };
 
         var node = state.Graph.Nodes[nodeId];
         var nodeType = state.Catalog.Get(node.Type);
@@ -131,40 +140,24 @@ public static class TickReportPrinter
             var port = nodeType.Inputs.TryGetValue(portId, out var inputPort)
                 ? inputPort
                 : nodeType.Outputs[portId];
-            AppendPort(lines, state, previous, nodeId, port);
+            AppendPort(rows, state, previous, baseline, nodeId, port);
         }
 
-        if (ShowsTimer(node.Type))
+        if (!ShowsCycles(node.Type))
         {
-            var period = FormatInt(state.NodeConfigs.Payroll.Period);
-            var timer = FormatInt(state.NodeTimers.GetValueOrDefault(nodeId, 0));
-            if (previous is null)
-            {
-                lines.Add($"  timer: {FormatWithTarget(timer, period)}");
-            }
-            else
-            {
-                var priorTimer = FormatInt(previous.NodeTimers.GetValueOrDefault(nodeId, 0));
-                lines.Add($"  timer: {FormatWithTarget(FormatChange(priorTimer, timer), period)}");
-            }
+            return rows;
         }
 
-        if (!ShowsProgress(node.Type))
-        {
-            return lines;
-        }
-
-        var effort = FormatRounded(EffortTarget(state.NodeConfigs, node.Type));
-        var progress = FormatRounded(state.NodeProgress.GetValueOrDefault(nodeId, 0));
+        var cycles = FormatInt(state.NodeCycles.GetValueOrDefault(nodeId, 0));
         if (previous is null)
         {
-            lines.Add($"  progress: {FormatWithTarget(progress, effort)}");
-            return lines;
+            rows.Add(new($"  cycles: {cycles}", string.Empty));
+            return rows;
         }
 
-        var priorProgress = FormatRounded(previous.NodeProgress.GetValueOrDefault(nodeId, 0));
-        lines.Add($"  progress: {FormatWithTarget(FormatChange(priorProgress, progress), effort)}");
-        return lines;
+        var priorCycles = FormatInt(previous.NodeCycles.GetValueOrDefault(nodeId, 0));
+        rows.Add(new($"  cycles: {FormatChange(priorCycles, cycles)}", string.Empty));
+        return rows;
     }
 
     private static List<string> FormatNodeAssignmentLines(GameState state, NodeId nodeId)
@@ -177,25 +170,60 @@ public static class TickReportPrinter
     }
 
     /// <summary>
-    /// Horizontally splits a node subpanel: state on the left, preferred assignments on the right.
+    /// Horizontally splits a node subpanel: state | optional Δ | preferred assignments.
     /// </summary>
     private static List<string> MergeNodeColumns(
-        IReadOnlyList<string> stateLines,
+        IReadOnlyList<NodeStateRow> stateRows,
         IReadOnlyList<string> assignmentLines,
-        int usableWidth)
+        int usableWidth,
+        bool includeDelta)
     {
         if (usableWidth < 3)
         {
             // Too narrow for a split — prefer state content.
-            return stateLines.ToList();
+            return stateRows.Select(r => r.Text).ToList();
         }
 
         // Right column sized for short "actor weight" rows; prefer room for state leaves.
         var assignWidth = Math.Clamp(usableWidth / 4, 8, 10);
-        var stateWidth = usableWidth - 1 - assignWidth;
-        var rowCount = Math.Max(1, Math.Max(stateLines.Count, assignmentLines.Count));
+        if (!includeDelta || usableWidth < assignWidth + 1 + 6 + 1 + 8)
+        {
+            // Not enough room for three columns — fall back to state | assignments.
+            var stateWidthTwo = usableWidth - 1 - assignWidth;
+            return MergeTwoColumns(
+                stateRows.Select(r => r.Text).ToList(),
+                assignmentLines,
+                stateWidthTwo,
+                assignWidth);
+        }
+
+        var deltaWidth = Math.Clamp(usableWidth / 8, 6, 8);
+        var stateWidth = usableWidth - 1 - deltaWidth - 1 - assignWidth;
+        var rowCount = Math.Max(1, Math.Max(stateRows.Count, assignmentLines.Count));
         var merged = new List<string>(rowCount);
 
+        for (var i = 0; i < rowCount; i++)
+        {
+            var left = i < stateRows.Count ? stateRows[i].Text : string.Empty;
+            var mid = i < stateRows.Count ? stateRows[i].Delta : string.Empty;
+            var right = i < assignmentLines.Count ? assignmentLines[i] : string.Empty;
+            merged.Add(
+                $"{ClipPad(left, stateWidth)}{BoxDrawing.SingleVertical}" +
+                $"{ClipPad(mid, deltaWidth)}{BoxDrawing.SingleVertical}" +
+                $"{ClipPad(right, assignWidth)}");
+        }
+
+        return merged;
+    }
+
+    private static List<string> MergeTwoColumns(
+        IReadOnlyList<string> stateLines,
+        IReadOnlyList<string> assignmentLines,
+        int stateWidth,
+        int assignWidth)
+    {
+        var rowCount = Math.Max(1, Math.Max(stateLines.Count, assignmentLines.Count));
+        var merged = new List<string>(rowCount);
         for (var i = 0; i < rowCount; i++)
         {
             var left = i < stateLines.Count ? stateLines[i] : string.Empty;
@@ -233,7 +261,7 @@ public static class TickReportPrinter
         return weight.ToString(CultureInfo.InvariantCulture);
     }
 
-    private static bool ShowsProgress(NodeTypeId typeId) =>
+    private static bool ShowsCycles(NodeTypeId typeId) =>
         typeId == MagicAgencySeed.EnchantTypeId
         || typeId == MagicAgencySeed.TestingTypeId
         || typeId == MagicAgencySeed.DesignTypeId
@@ -242,106 +270,87 @@ public static class TickReportPrinter
         || typeId == MagicAgencySeed.PayrollTypeId
         || typeId == MagicAgencySeed.MergeTypeId;
 
-    private static bool ShowsTimer(NodeTypeId typeId) =>
-        typeId == MagicAgencySeed.PayrollTypeId;
-
-    private static double EffortTarget(NodeTypeConfigs configs, NodeTypeId typeId)
-    {
-        if (typeId == MagicAgencySeed.EnchantTypeId)
-        {
-            return configs.Enchant.Effort;
-        }
-
-        if (typeId == MagicAgencySeed.TestingTypeId)
-        {
-            return configs.Testing.Effort;
-        }
-
-        if (typeId == MagicAgencySeed.SellTypeId)
-        {
-            return configs.Sell.Effort;
-        }
-
-        if (typeId == MagicAgencySeed.TreasuryTypeId)
-        {
-            return configs.Treasury.Effort;
-        }
-
-        if (typeId == MagicAgencySeed.PayrollTypeId)
-        {
-            return configs.Payroll.Effort;
-        }
-
-        if (typeId == MagicAgencySeed.MergeTypeId)
-        {
-            return configs.Merge.Effort;
-        }
-
-        if (typeId == MagicAgencySeed.DesignTypeId)
-        {
-            return configs.Design.Effort;
-        }
-
-        throw new InvalidOperationException($"No effort target for node type '{typeId.Value}'.");
-    }
-
-    private static string FormatWithTarget(string current, string target) =>
-        $"{current} / {target}";
-
     private static void AppendPort(
-        List<string> lines,
+        List<NodeStateRow> rows,
         GameState state,
         GameState? previous,
+        GameState? baseline,
         NodeId nodeId,
         Port port)
     {
         var key = new PortKey(nodeId, port.Id);
         var current = state.PortSignals.GetValueOrDefault(key);
         var prior = previous?.PortSignals.GetValueOrDefault(key);
+        var baseValue = baseline?.PortSignals.GetValueOrDefault(key);
         var kind = KindOf(port.Type.Id);
 
         if (kind == SignalKind.Resource)
         {
             var currentText = FormatResourceLeaf(current);
+            var delta = baseline is null
+                ? string.Empty
+                : FormatSignedDelta(RoundedResource(baseValue), RoundedResource(current));
             if (previous is null)
             {
-                lines.Add($"  {port.Id.Value}: {currentText}");
+                rows.Add(new($"  {port.Id.Value}: {currentText}", delta));
                 return;
             }
 
             var priorText = FormatResourceLeaf(prior);
-            lines.Add($"  {port.Id.Value}: {FormatChange(priorText, currentText)}");
+            rows.Add(new($"  {port.Id.Value}: {FormatChange(priorText, currentText)}", delta));
             return;
         }
 
         // Information — empty stock displays as 0 (same sentinel as money).
         var currentInfo = current as SignalValue.Enchantment;
         var priorInfo = prior as SignalValue.Enchantment;
+        var baseInfo = baseValue as SignalValue.Enchantment;
 
         if (currentInfo is null && (previous is null || priorInfo is null))
         {
-            lines.Add($"  {port.Id.Value}: 0");
+            rows.Add(new($"  {port.Id.Value}: 0", string.Empty));
             return;
         }
 
         if (currentInfo is null && priorInfo is not null)
         {
-            lines.Add($"  {port.Id.Value}:");
-            AppendEnchantmentLeaf(lines, "hash", priorInfo.Block.AbbreviatedHash, "0");
-            AppendEnchantmentLeaf(lines, "volume", FormatRounded(priorInfo.Volume), "0");
-            AppendEnchantmentLeaf(lines, "darkness", FormatRounded(priorInfo.Darkness), "0");
-            AppendEnchantmentLeaf(lines, "fallacy", FormatRounded(priorInfo.Fallacy), "0");
+            rows.Add(new($"  {port.Id.Value}:", string.Empty));
+            AppendEnchantmentLeaf(rows, "hash", priorInfo.Block.AbbreviatedHash, "0", string.Empty);
+            AppendEnchantmentLeaf(
+                rows,
+                "volume",
+                FormatRounded(priorInfo.Volume),
+                "0",
+                FormatNumericDelta(baseline, baseInfo?.Volume ?? 0, 0));
+            AppendEnchantmentLeaf(
+                rows,
+                "darkness",
+                FormatRounded(priorInfo.Darkness),
+                "0",
+                FormatNumericDelta(baseline, baseInfo?.Darkness ?? 0, 0));
+            AppendEnchantmentLeaf(
+                rows,
+                "fallacy",
+                FormatRounded(priorInfo.Fallacy),
+                "0",
+                FormatNumericDelta(baseline, baseInfo?.Fallacy ?? 0, 0));
             return;
         }
 
         // current present
-        lines.Add($"  {port.Id.Value}:");
+        rows.Add(new($"  {port.Id.Value}:", string.Empty));
         if (previous is null)
         {
-            lines.Add($"    hash: {currentInfo!.Block.AbbreviatedHash}");
-            lines.Add($"    volume: {FormatRounded(currentInfo.Volume)}");
-            lines.Add($"    darkness: {FormatRounded(currentInfo.Darkness)}");
-            lines.Add($"    fallacy: {FormatRounded(currentInfo.Fallacy)}");
+            rows.Add(new($"    hash: {currentInfo!.Block.AbbreviatedHash}", string.Empty));
+            rows.Add(new(
+                $"    volume: {FormatRounded(currentInfo.Volume)}",
+                FormatNumericDelta(baseline, baseInfo?.Volume ?? 0, currentInfo.Volume)));
+            rows.Add(new(
+                $"    darkness: {FormatRounded(currentInfo.Darkness)}",
+                FormatNumericDelta(baseline, baseInfo?.Darkness ?? 0, currentInfo.Darkness)));
+            rows.Add(new(
+                $"    fallacy: {FormatRounded(currentInfo.Fallacy)}",
+                FormatNumericDelta(baseline, baseInfo?.Fallacy ?? 0, currentInfo.Fallacy)));
             return;
         }
 
@@ -349,18 +358,64 @@ public static class TickReportPrinter
         var priorVolume = priorInfo is null ? "0" : FormatRounded(priorInfo.Volume);
         var priorDarkness = priorInfo is null ? "0" : FormatRounded(priorInfo.Darkness);
         var priorFallacy = priorInfo is null ? "0" : FormatRounded(priorInfo.Fallacy);
-        AppendEnchantmentLeaf(lines, "hash", priorHash, currentInfo!.Block.AbbreviatedHash);
-        AppendEnchantmentLeaf(lines, "volume", priorVolume, FormatRounded(currentInfo.Volume));
-        AppendEnchantmentLeaf(lines, "darkness", priorDarkness, FormatRounded(currentInfo.Darkness));
-        AppendEnchantmentLeaf(lines, "fallacy", priorFallacy, FormatRounded(currentInfo.Fallacy));
+        AppendEnchantmentLeaf(
+            rows,
+            "hash",
+            priorHash,
+            currentInfo!.Block.AbbreviatedHash,
+            string.Empty);
+        AppendEnchantmentLeaf(
+            rows,
+            "volume",
+            priorVolume,
+            FormatRounded(currentInfo.Volume),
+            FormatNumericDelta(baseline, baseInfo?.Volume ?? 0, currentInfo.Volume));
+        AppendEnchantmentLeaf(
+            rows,
+            "darkness",
+            priorDarkness,
+            FormatRounded(currentInfo.Darkness),
+            FormatNumericDelta(baseline, baseInfo?.Darkness ?? 0, currentInfo.Darkness));
+        AppendEnchantmentLeaf(
+            rows,
+            "fallacy",
+            priorFallacy,
+            FormatRounded(currentInfo.Fallacy),
+            FormatNumericDelta(baseline, baseInfo?.Fallacy ?? 0, currentInfo.Fallacy));
     }
 
     private static void AppendEnchantmentLeaf(
-        List<string> lines,
+        List<NodeStateRow> rows,
         string name,
         string prior,
-        string current) =>
-        lines.Add($"    {name}: {FormatChange(prior, current)}");
+        string current,
+        string delta) =>
+        rows.Add(new($"    {name}: {FormatChange(prior, current)}", delta));
+
+    private static string FormatNumericDelta(GameState? baseline, double baseAmount, double currentAmount) =>
+        baseline is null ? string.Empty : FormatSignedDelta(RoundAway(baseAmount), RoundAway(currentAmount));
+
+    private static long RoundedResource(SignalValue? value) => value switch
+    {
+        null => 0,
+        SignalValue.Money m => RoundAway(m.Amount),
+        SignalValue.Designs d => RoundAway(d.Amount),
+        _ => throw new InvalidOperationException(
+            $"Expected resource money or designs on port, got {value.GetType().Name}."),
+    };
+
+    private static string FormatSignedDelta(long baseline, long current)
+    {
+        var delta = current - baseline;
+        if (delta == 0)
+        {
+            return "0";
+        }
+
+        return delta > 0
+            ? $"+{delta.ToString(CultureInfo.InvariantCulture)}"
+            : delta.ToString(CultureInfo.InvariantCulture);
+    }
 
     private static string FormatResourceLeaf(SignalValue? value) => value switch
     {
@@ -389,8 +444,11 @@ public static class TickReportPrinter
         throw new InvalidOperationException($"Unknown signal type for display: {typeId.Value}.");
     }
 
+    private static long RoundAway(double value) =>
+        (long)Math.Round(value, MidpointRounding.AwayFromZero);
+
     private static string FormatRounded(double value) =>
-        Math.Round(value, MidpointRounding.AwayFromZero).ToString(CultureInfo.InvariantCulture);
+        RoundAway(value).ToString(CultureInfo.InvariantCulture);
 
     private static string FormatInt(int value) =>
         value.ToString(CultureInfo.InvariantCulture);

@@ -2,7 +2,7 @@
 
 ## Summary
 
-Authoritative production state lives in **Simulation** as an Imp-inspired node graph plus actors, assignments, buffered port signals, per-node progress, per-node timers, and a FIFO **pending money-move** queue for treasury. Updates are **pure** functions composed of discrete batched transforms; the host stores the resulting `GameState` in a mutable variable.
+Authoritative production state lives in **Simulation** as an Imp-inspired node graph plus actors, assignments, buffered port signals, per-node progress, per-node timers, per-node **cycles** (completed applications), and a FIFO **pending money-move** queue for treasury. Updates are **pure** functions composed of discrete batched transforms; the host stores the resulting `GameState` in a mutable variable.
 
 ## When to read this
 
@@ -49,9 +49,9 @@ Identifiers are strings (or thin string wrappers): `NodeId`, `EdgeId`, `NodeType
 | `Assignment` | Preferred `ActorId` → `NodeId` with positive relative `Weight` (`decimal`, default `1`) (many nodes per actor) |
 | `PendingMoneyMove` | FIFO treasury queue entry: direction `In` / `Out` + `Amount` |
 | `NodeTypeConfigs` | Per-type behavior numerics loaded from JSON and attached to state |
-| `GameState` | Graph + catalog + port signals + actors + preferred assignments + node configs + **node progress** + **node timers** + **pending money moves** + **enchantment block map** + **next unit id** + `Tick` |
+| `GameState` | Graph + catalog + port signals + actors + preferred assignments + node configs + **node progress** + **node timers** + **node cycles** + **pending money moves** + **enchantment block map** + **next unit id** + `Tick` |
 
-Port signals are keyed by `(NodeId, PortId)`. Node progress and node timers are keyed by `NodeId`.
+Port signals are keyed by `(NodeId, PortId)`. Node progress, node timers, and node cycles are keyed by `NodeId`.
 
 ### Signal kinds
 
@@ -82,7 +82,7 @@ Progress gain on a node = sum over effectively assigned actors of `GetStat(actor
 
 ## Progress and config effort
 
-Each seed node carries runtime `progress` (`double`, default `0`).
+Each seed node carries runtime `progress` (`double`, default `0`) and cumulative **cycles** (`int`, default `0`) — the count of completed applications since tick 0.
 
 Node configs include:
 
@@ -92,7 +92,7 @@ Node configs include:
 - sell also has `payoutFloor`
 - payroll also has `defaultWage` / `period`
 
-**Enchant** required work per mutation = `config.effort + current.darknessCount` (recomputed after each mutate). Other nodes use `config.effort` per application. While progress covers the required amount, applications run and subtract that amount.
+**Enchant** required work per mutation = `config.effort + current.darknessCount` (recomputed after each mutate). Other nodes use `config.effort` per application. While progress covers the required amount, applications run and subtract that amount; each application increments that node’s `NodeCycles` by `1`.
 
 ## Node behaviors
 
@@ -174,7 +174,7 @@ Pipeline (each step returns new data; no mutation of prior state):
 3. **`ComputeOutputs`** — Node-type-specific behavior using each node’s port inputs, assignment effort, stats, progress, and start-of-tick pending moves. Nodes are independent (no same-tick money chain). Node iteration order must not change results. May enqueue payroll outbound onto a next-pending builder (when a treasury→payroll money funding edge exists); treasury only drains the start-of-tick queue into residuals / actor updates and may emit money on successful outs.
 4. **`CommitSignals`** — Residuals; route outputs (group by destination; residual + routed copies **`+`** — money/designs `AddResource`, enchantment `TryCombine`; incompatible enchantment histories omit the dest key; money to treasury **enqueues inbound** on the pending builder, including treasury→payroll wage delivery). Register any new combined enchantment block.
 5. **`AdvancePayrollTimer`** — If payroll elapsed `< period`, increment by 1 (no auto-pay).
-6. **`NextState`** — New signals, updated progress/timers/pending maps, actors/assignments, `Tick + 1`.
+6. **`NextState`** — New signals, updated progress/timers/cycles/pending maps, actors/assignments, `Tick + 1`.
 
 Host pattern:
 
@@ -196,7 +196,7 @@ Play bootstrap: `ScenarioBootstrap.CreateInitialState(GameConfig)` (loads node c
 - **Design variation:** add node `design`; keep essential enchantment and money edges; add `design.designs` → `enchant.designs`. Mutually exclusive with testing.
 - **Preset `lab01`:** `includeTesting: true`, `includeDesign: false`; actors `intern` and `boss` (stats as configured, wages unset). Preferred assignments (weight `1` each): intern → enchant, testing; boss → payroll, sell, treasury.
 - **Actor pool:** `config/scenarios/actor-pool.json` lists eligible actor ids (not every file under `config/actors/`). Random generation: equal thirds among none / testing / design (never both); 2–4 distinct pool actors; preferred assignments (weight `1`) cover **every** graph node; multi-actor overlap on a node is allowed but sparse (more likely when actors are plentiful relative to nodes). Deterministic for a fixed seed.
-- Initial signals: `enchant.enchantment` = genesis empty block; `treasury.money` = `100`; `EnchantmentBlocks` contains genesis; `NextUnitId` = `1`; progress empty/`0`; payroll timer = `0`; pending money moves empty; `Tick = 0`.
+- Initial signals: `enchant.enchantment` = genesis empty block; `treasury.money` = `100`; `EnchantmentBlocks` contains genesis; `NextUnitId` = `1`; progress empty/`0`; cycles empty/`0`; payroll timer = `0`; pending money moves empty; `Tick = 0`.
 
 ## Layout
 

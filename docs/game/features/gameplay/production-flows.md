@@ -46,9 +46,9 @@ Do not use “man/manning” in product language; use **assignment** / **assigne
 
 ## Progress, work effort, and money
 
-- Every seed node tracks runtime **progress** (carried across ticks).
+- Every seed node tracks runtime **progress** (carried across ticks) and cumulative **cycles** (completed applications since tick 0).
 - Node config **`effort`** is the base work units required per application. Each node type may use a different effort.
-- While progress covers the required work for an application, the node may apply one or more times in a tick; each application subtracts its required work from progress.
+- While progress covers the required work for an application, the node may apply one or more times in a tick; each application subtracts its required work from progress and increments that node’s cycle count by one.
 - **`enchant`:** with assignment effort and an input enchantment, the node always forwards the enchantment—either **mutate** or **pass-through**. Required work per mutation is `effort + enchantment.darkness` (darkness **unit count** on the value being mutated; recomputed after each mutate in the same tick). Optional `designs` resource input: missing Designs does not block work. When **any** mutation completes this tick, consume the **entire** available Designs stock (excess discarded) and add `max(0, 2 × darknessDelta − designs)` darkness units on that first mutation; later mutations in the same tick add darkness with `designs = 0`. If no mutation completes, Designs remain as input residual. No money ports.
 - **`design`:** source node (no inputs). With assignment effort, add progress; each completed application **emits** one Designs unit on the `designs` output (applications in a tick **add**). Under effort: emit nothing. Designs routed onto `enchant.designs` are buffered until the next tick (no same-tick chain).
 - **`testing`:** with assignment effort and an input enchantment, always forwards the enchantment. Each completed application removes `fallacyReduction ×` (number of actors effectively assigned to testing that tick) **discrete fallacy units** (lowest ids first), floored at empty. Pass-through when under effort.
@@ -90,7 +90,7 @@ Node types (always in the catalog): `enchant` — mutate or pass-through, option
 | Merge / `+` formula | Same hash or ancestor/descendant → newer tip; any pair with no common ancestor → empty; else n-way set merge per property (omit ancestor units missing from any side; otherwise union). New block parent = lexicographically smaller incomparable-tip hash. Dedicated merge node effort `1` |
 | Sell formula | payout = `max(payoutFloor, volumeCount - fallacyCount)` (default `payoutFloor=0`) |
 | Work / payroll | Config `effort: 10` on enchant/testing/sell; design `effort: 3`; merge `effort: 1`; treasury `effort: 1`; payroll `defaultWage: 10`, `period: 5`, `effort: 1`; progress gain uses actor stats × assignment effort (`designing` / `merging` default `1`); wage total covers **all** roster actors |
-| Starting stocks | Prime ports: `enchant` enchantment = genesis empty block; `treasury` money = `100`; other process ports empty; payroll timer = `0`; pending money moves empty; block map holds genesis; node progress `0` |
+| Starting stocks | Prime ports: `enchant` enchantment = genesis empty block; `treasury` money = `100`; other process ports empty; payroll timer = `0`; pending money moves empty; block map holds genesis; node progress `0`; node cycles `0` |
 | Config | Node numerics in `config/node-types/{enchant,testing,design,merge,sell,treasury,payroll}.json`; actor definitions in `config/actors/*.json`; named presets and the actor pool in `config/scenarios/`; port layouts and graph construction stay in code |
 
 ### Preset `lab01`

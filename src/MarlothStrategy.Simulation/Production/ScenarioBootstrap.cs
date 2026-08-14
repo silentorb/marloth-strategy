@@ -143,6 +143,7 @@ public static class ScenarioBootstrap
             nodeConfigs,
             ImmutableDictionary<NodeId, double>.Empty,
             timers,
+            ImmutableDictionary<NodeId, int>.Empty,
             ImmutableArray<PendingMoneyMove>.Empty,
             blocks,
             NextUnitId: 1,

@@ -18,7 +18,7 @@
 - App reads `SCENARIO_PRESET` (optional name; whitespace/empty → unset → random scenario) and `SCENARIO_SEED` (optional integer; unset → `Random.Shared.Next()`; invalid → fail-fast at the abort boundary) into `GameConfig`, then calls `ConsoleClient.Run(config)`.
 - Prefer a **single abort boundary** at process entry for fatal/unrecoverable errors ([error handling](../platform/error-handling.md)); do not scatter catches in Client.
 - Client boots with `ScenarioBootstrap.CreateInitialState(config)`, clears the screen, prints the tick-0 panel screen, then loops until quit/EOF ([console loop](../../../game/features/session/console-loop.md)).
-- On Enter: capture prior state, `var result = ProductionTick.AdvanceTickWithReport(state); state = result.State;` then clear and print `FormatScreen(state, previous, result)` so change arrows use committed stocks (and payroll timer / actors).
+- On Enter: capture prior state, `var result = ProductionTick.AdvanceTickWithReport(state); state = result.State;` then clear and print `FormatScreen(state, previous, result, …, baseline: tick0)` so change arrows use committed stocks (and cycles / actors) and the Δ column uses tick-0 baselines.
 - Interactive input uses `Console.ReadKey(intercept: true)` so **Enter** and **`q`/`Q`** are single keypresses. When `Console.IsInputRedirected`, fall back to `ReadLine` (empty line / `q`) for agent piped smoke.
 - Invalid prompt input clears, redraws the current screen, prints a short hint, and re-prompts. Expected player mistakes are not exceptions.
 - The prompt sits **below** the framed report (not inside a panel).
@@ -30,26 +30,26 @@
 
 ## Panel layout
 
-The screen is three logical regions composed with classic single- and double-line box-drawing characters. The bottom split is **left:right = 1:2** (left interior is one-third of `totalWidth - 3`).
+The screen is three logical regions composed with classic single- and double-line box-drawing characters. The bottom split is **left:right = 1:1** (left interior is half of `totalWidth - 3`).
 
 ```text
 ╔══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗
 ║ Marloth Strategy                                                                                                     ║
 ║ Tick N                                                                                                               ║
 ║ actors: …                                                                                                            ║
-╠══════════════════════════════════════╤═══════════════════════════════════════════════════════════════════════════════╣
-║ node-id:            │ actor weight   │  (flow graph)                                                                 ║
-║   port: …           │                │                                                                               ║
-╟─────────────────────┴────────────────┤                                                                               ║
-║ other-node:         │ …              │                                                                               ║
-║   …                 │                │                                                                               ║
-╚══════════════════════════════════════╧═══════════════════════════════════════════════════════════════════════════════╝
+╠════════════════════════════════════════════════════════╤═════════════════════════════════════════════════════════════╣
+║ node-id:            │ Δ      │ actor weight            │  (flow graph)                                               ║
+║   port: …           │ +9     │                         │                                                             ║
+╟─────────────────────┴────────┴─────────────────────────┤                                                             ║
+║ other-node:         │ Δ      │ …                       │                                                             ║
+║   …                 │        │                         │                                                             ║
+╚════════════════════════════════════════════════════════╧═════════════════════════════════════════════════════════════╝
 ```
 
 | Region | Border | Content |
 |--------|--------|---------|
 | Top status | Double outer | Title, `Tick N`, `actors:` line |
-| Left state | Double outer shared with right; node **subpanels** stacked with single-line horizontal dividers (`╟`/`╢` against double verticals) | One subpanel per graph node (id order). Each subpanel is **split horizontally**: left = port / timer / progress leaves; right = preferred assignments as `actorId weight` (ordinal by actor id; blank when none) |
+| Left state | Double outer shared with right; node **subpanels** stacked with single-line horizontal dividers (`╟`/`╢` against double verticals) | One subpanel per graph node (id order). Each subpanel is **split horizontally** into three columns when a tick-0 baseline is supplied: left = port / cycles leaves; middle = signed net change since tick 0 (`Δ`); right = preferred assignments as `actorId weight` (ordinal by actor id; blank when none). Without a baseline, the middle column is omitted |
 | Right flow | Double outer; interior uses single-line node boxes | MSAGL Sugiyama + rectilinear routing with `RelativeFloatingPort` anchors (inputs on top, outputs on bottom, spaced per port); ASCII rasterizes those polylines |
 
 Helpers: `BoxDrawing` (character constants), `AsciiCanvas` (char buffer), `PanelLayout` (compose top + split bottom; `LeftInteriorWidthForTotal`), `FlowGraphLayout` (MSAGL layout + floating ports), `FlowGraphWires` (orthogonal connector glyphs), `FlowGraphPrinter` (quantize MSAGL geometry onto a character grid).
@@ -63,13 +63,13 @@ Leaf formatting inside left subpanels (and header actors) follows:
 | Title / tick | Header lines: `Marloth Strategy`, then `Tick {N}` |
 | Scenario | When `GameConfig` is supplied: `scenario: {preset-or-random} seed {N}` (`lab01`, `random`, etc.) |
 | Actors | One `actors:` line: comma-separated actor ids (ordinal) when present; `0` when the roster is empty. With a previous state, annotate roster changes with `previous → current` (e.g. `boss, intern → 0` after a mass quit) |
-| Nodes | One left subpanel per graph node, ordered by node id. Each subpanel splits horizontally: state leaves on the left; preferred assignments on the right (`actorId weight`, ordinal by actor id) |
+| Nodes | One left subpanel per graph node, ordered by node id. Each subpanel splits horizontally: state leaves; optional signed Δ since tick 0; preferred assignments (`actorId weight`, ordinal by actor id) |
 | Ports | Union of the node type’s input and output ports (ordinal by port id). Same-named input/output ports share one committed `PortSignals` stock and one display entry |
 | Money (resource) | Committed stock on the port with change arrows from the prior tick (`previous → current` when different). Tick 0 shows committed stock only. Missing stock displays as `0`; numerics **rounded** to nearest integer |
 | Designs (resource) | Same scalar resource rules as money: committed count, `0` when missing, change arrows from the prior tick |
 | Enchantment (information) | Nested `hash` (abbreviated, 7 hex chars) plus `volume` / `darkness` / `fallacy` aggregate counts when present; absent displays as `0`; counts rounded for display; change arrows from prior committed stock |
-| Progress | Shown for all seed node types (`enchant`, `testing`, `design`, `merge`, `sell`, `treasury`, `payroll`). Rounded numeric from `NodeProgress` (default `0`); clause ends with suffix ` / {effort}` (that node type’s config effort), including after a change arrow |
-| Timer | Shown for `payroll` from `NodeTimers` as integer elapsed; clause ends with suffix ` / {period}` (including after a change arrow) |
+| Cycles | Shown for all seed node types (`enchant`, `testing`, `design`, `merge`, `sell`, `treasury`, `payroll`). Integer cumulative completed applications from `NodeCycles` (default `0`) since tick 0; with a previous state, annotate as `previous → current` when different |
+| Accumulative Δ | When a tick-0 baseline state is supplied, a middle column shows signed net change since that baseline for numeric leaves (money, designs, volume, darkness, fallacy): `+N` / `-N` / `0`. Header row shows `Δ`. Hash rows, port headers, and the cycles leaf leave the Δ cell blank (cycles are already lifetime) |
 | Payroll money | Seed payroll has a `money` input (wage delivery); empty displays as `0` like other resource ports |
 | Change annotations | When a previous state is supplied, compare rounded display strings per leaf; if different, print `previous → current` (U+2192); if equal, print current only. Tick 0 has no previous state (no arrows). Empty leaves use `0` (never `-`) |
 | Flow graph | Right panel: MSAGL positions and port-anchored edge routes quantized to a character grid; single-line boxed node ids; directed connectors for all port-to-port edges (self-loops annotated); isolated nodes included; top-aligned in the column |

@@ -3,13 +3,13 @@ namespace MarlothStrategy.Console.Client.Tests;
 public sealed class PanelLayoutTests
 {
     [Fact]
-    public void LeftInteriorWidthForTotal_DefaultWidth_IsOneThirdInterior()
+    public void LeftInteriorWidthForTotal_DefaultWidth_IsHalfInterior()
     {
         Assert.Equal(120, PanelLayout.DefaultWidth);
         var left = PanelLayout.LeftInteriorWidthForTotal(PanelLayout.DefaultWidth);
-        Assert.Equal((PanelLayout.DefaultWidth - 3) / 3, left);
+        Assert.Equal((PanelLayout.DefaultWidth - 3) / 2, left);
         var right = PanelLayout.DefaultWidth - left - 3;
-        Assert.True(right >= left * 2 - 1, $"Expected ~1:2 split, got left={left} right={right}");
+        Assert.True(Math.Abs(right - left) <= 1, $"Expected ~1:1 split, got left={left} right={right}");
     }
 
     [Fact]
