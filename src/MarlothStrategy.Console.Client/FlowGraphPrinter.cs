@@ -10,6 +10,7 @@ public static class FlowGraphPrinter
 {
     private const int BoxHeight = 3;
     private const int Margin = 1;
+    private const int SelfLoopAnnotationWidth = 3;
 
     public static IReadOnlyList<string> FormatLines(GameState state, int maxWidth = 60)
     {
@@ -87,9 +88,13 @@ public static class FlowGraphPrinter
             return (x - originX + pad, y - originY + pad);
         }
 
+        var selfLoopNodes = layout.Nodes.Where(n => n.HasSelfLoop).Select(n => n.Id).ToHashSet();
+        int OccupiedRight(NodeId id, int x, int w) =>
+            x + w + (selfLoopNodes.Contains(id) ? SelfLoopAnnotationWidth : 0);
+
         // Fit width by uniform X shrink if needed (keep MSAGL relative geometry).
         var rightMost = Math.Max(
-            placed.Values.Max(p => p.X + p.W),
+            placed.Max(kv => OccupiedRight(kv.Key, kv.Value.X, kv.Value.W)),
             layout.Edges.SelectMany(e => e.Points).Select(p => MapShifted(p).X).DefaultIfEmpty(0).Max() + 1);
         if (rightMost + pad > maxWidth)
         {
@@ -104,7 +109,13 @@ public static class FlowGraphPrinter
             placed = placed.ToDictionary(
                 kv => kv.Key,
                 kv => (
-                    Math.Clamp(kv.Value.X, pad, Math.Max(pad, maxWidth - pad - kv.Value.W)),
+                    Math.Clamp(
+                        kv.Value.X,
+                        pad,
+                        Math.Max(
+                            pad,
+                            maxWidth - pad - kv.Value.W
+                                - (selfLoopNodes.Contains(kv.Key) ? SelfLoopAnnotationWidth : 0))),
                     kv.Value.Y,
                     kv.Value.W,
                     kv.Value.H));
@@ -132,7 +143,13 @@ public static class FlowGraphPrinter
             .Select(e => (Edge: e, Pts: e.Points.Select(mapPoint).ToList()))
             .ToArray();
 
-        var contentRight = placed.Values.Max(p => p.X + p.W);
+        var contentRight = placed.Max(kv =>
+        {
+            var extra = layout.Nodes.Any(n => n.Id == kv.Key && n.HasSelfLoop)
+                ? SelfLoopAnnotationWidth
+                : 0;
+            return kv.Value.X + kv.Value.W + extra;
+        });
         var contentBottom = placed.Values.Max(p => p.Y + p.H);
         if (edgePolylines.Length > 0)
         {
@@ -297,9 +314,9 @@ public static class FlowGraphPrinter
             canvas.WriteText(x + 1, y + 1, inner, contentWidth);
         }
 
-        if (hasSelfLoop && x + boxWidth + 3 <= canvas.Width && y + 1 < canvas.Height)
+        if (hasSelfLoop && x + boxWidth + SelfLoopAnnotationWidth <= canvas.Width && y + 1 < canvas.Height)
         {
-            canvas.WriteText(x + boxWidth, y + 1, "──┐", 3);
+            canvas.WriteText(x + boxWidth, y + 1, "──┐", SelfLoopAnnotationWidth);
             if (y + 2 < canvas.Height && x + boxWidth + 2 < canvas.Width)
             {
                 canvas[x + boxWidth + 2, y + 2] = BoxDrawing.SingleVertical;

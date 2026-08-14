@@ -16,9 +16,9 @@ public sealed class TickReportPrinterTests
             FallacyConstant: 1),
         new TestingNodeConfig(Effort: 10, FallacyReduction: 5),
         new SellNodeConfig(Effort: 10, PayoutFloor: 0),
-        new TreasuryNodeConfig(Effort: 2),
-        new PayrollNodeConfig(DefaultWage: 10, Period: 5, Effort: 5),
-        new MergeNodeConfig(Effort: 5));
+        new TreasuryNodeConfig(Effort: 1),
+        new PayrollNodeConfig(DefaultWage: 10, Period: 5, Effort: 1),
+        new MergeNodeConfig(Effort: 1));
 
     private static readonly ImmutableDictionary<ActorId, Actor> DefaultActors =
         ImmutableDictionary<ActorId, Actor>.Empty
@@ -61,13 +61,13 @@ public sealed class TickReportPrinterTests
         Assert.Contains("    volume: 0", text);
         Assert.Contains("    darkness: 0", text);
         Assert.Contains("    fallacy: 0", text);
-        Assert.Contains("  progress: 0", text);
+        Assert.Contains("  progress: 0 / 10", text);
         Assert.Contains("testing:", text);
         Assert.Contains("merge:", text);
         Assert.Contains("  primary: 0", text);
         Assert.Contains("  secondary: 0", text);
         Assert.Contains("payroll:", text);
-        Assert.Contains("  timer: 5", text);
+        Assert.Contains("  timer: 0 / 5", text);
         Assert.Contains("  money: 0", text);
         Assert.Contains("sell:", text);
         Assert.Contains("  enchantment: 0", text);
@@ -111,7 +111,7 @@ public sealed class TickReportPrinterTests
         Assert.Contains("Tick 1", normalized);
         Assert.Contains("actors: boss, intern", normalized);
         Assert.Contains("volume: 0 \u2192 10", normalized);
-        Assert.Contains("timer: 5 \u2192 4", normalized);
+        Assert.Contains("timer: 0 \u2192 1 / 5", normalized);
         Assert.Contains("treasury:", normalized);
         Assert.Contains("  money: 100", normalized);
         Assert.DoesNotContain("money: 100 \u2192 80", text);
@@ -141,7 +141,7 @@ public sealed class TickReportPrinterTests
                 .Add(MagicAgencySeed.SellNodeId, 5)
                 .Add(MagicAgencySeed.TreasuryNodeId, 1)
                 .Add(MagicAgencySeed.PayrollNodeId, 2),
-            NodeTimers = previous.NodeTimers.SetItem(MagicAgencySeed.PayrollNodeId, 4),
+            NodeTimers = previous.NodeTimers.SetItem(MagicAgencySeed.PayrollNodeId, 1),
             Actors = ImmutableDictionary<ActorId, Actor>.Empty,
             Assignments = ImmutableArray<Assignment>.Empty,
         };
@@ -151,13 +151,13 @@ public sealed class TickReportPrinterTests
 
         Assert.Contains("actors: boss, intern \u2192 0", normalized);
         Assert.Contains("money: 100 \u2192 80", normalized);
-        Assert.Contains("progress: 0 \u2192 1", normalized);
+        Assert.Contains("progress: 0 \u2192 1 / 1", normalized);
         Assert.Contains("volume: 0 \u2192 10", text);
         Assert.Contains("darkness: 0 \u2192 1", text);
         Assert.Contains("fallacy: 0 \u2192 1", text);
-        Assert.Contains("progress: 0 \u2192 5", text);
-        Assert.Contains("timer: 5 \u2192 4", normalized);
-        Assert.Contains("progress: 0 \u2192 2", normalized);
+        Assert.Contains("progress: 0 \u2192 5 / 10", text);
+        Assert.Contains("timer: 0 \u2192 1 / 5", normalized);
+        Assert.Contains("progress: 0 \u2192 2 / 1", normalized);
         Assert.Contains($"hash: {EnchantmentBlock.CreateGenesis().AbbreviatedHash} \u2192 {block.AbbreviatedHash}", text);
     }
 

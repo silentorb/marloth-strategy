@@ -4,8 +4,9 @@ using MarlothStrategy.Simulation.Graph;
 namespace MarlothStrategy.Simulation.Production;
 
 /// <summary>
-/// Builds the magic-agency node catalog and graph from the essential baseline,
-/// optionally adding the testing+merge variation.
+/// Builds the magic-agency node catalog and graph from the essential baseline
+/// (including an enchant self-loop), optionally replacing that loop with the
+/// testing+merge variation.
 /// </summary>
 public static class GraphFactory
 {
@@ -74,6 +75,9 @@ public static class GraphFactory
                 .Add(MagicAgencySeed.MergeTypeId, mergeType));
     }
 
+    /// <summary>
+    /// Essential baseline: enchant self-loop plus the money spine through sell/treasury/payroll.
+    /// </summary>
     public static NodeGraph CreateEssentialGraph()
     {
         return new NodeGraph(
@@ -83,6 +87,11 @@ public static class GraphFactory
                 .Add(MagicAgencySeed.TreasuryNodeId, new Node(MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.TreasuryTypeId))
                 .Add(MagicAgencySeed.PayrollNodeId, new Node(MagicAgencySeed.PayrollNodeId, MagicAgencySeed.PayrollTypeId)),
             ImmutableDictionary<EdgeId, Edge>.Empty
+                .Add(
+                    new EdgeId("enchantment-to-enchant"),
+                    new Edge(
+                        new PortReference(MagicAgencySeed.EnchantNodeId, MagicAgencySeed.EnchantmentPortId),
+                        new PortReference(MagicAgencySeed.EnchantNodeId, MagicAgencySeed.EnchantmentPortId)))
                 .Add(
                     new EdgeId("enchantment-to-sell"),
                     new Edge(
@@ -100,6 +109,10 @@ public static class GraphFactory
                         new PortReference(MagicAgencySeed.PayrollNodeId, MagicAgencySeed.MoneyPortId))));
     }
 
+    /// <summary>
+    /// Testing+merge variation: the essential <c>enchant→enchant</c> self-loop is replaced
+    /// by <c>enchant→merge.primary</c>; <c>enchant→sell</c> fans out through testing.
+    /// </summary>
     public static NodeGraph CreateTestingMergeGraph()
     {
         return new NodeGraph(

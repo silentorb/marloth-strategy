@@ -13,9 +13,9 @@ public sealed class FlowGraphPrinterTests
             FallacyConstant: 1),
         new TestingNodeConfig(Effort: 10, FallacyReduction: 5),
         new SellNodeConfig(Effort: 10, PayoutFloor: 0),
-        new TreasuryNodeConfig(Effort: 2),
-        new PayrollNodeConfig(DefaultWage: 10, Period: 5, Effort: 5),
-        new MergeNodeConfig(Effort: 5));
+        new TreasuryNodeConfig(Effort: 1),
+        new PayrollNodeConfig(DefaultWage: 10, Period: 5, Effort: 1),
+        new MergeNodeConfig(Effort: 1));
 
     private static readonly ImmutableDictionary<ActorId, Actor> DefaultActors =
         ImmutableDictionary<ActorId, Actor>.Empty
@@ -95,5 +95,22 @@ public sealed class FlowGraphPrinterTests
         Assert.True(
             inboundColumns.Count >= 2,
             $"Expected distinct merge input columns from MSAGL ports, got [{string.Join(',', inboundColumns.OrderBy(c => c))}]");
+    }
+
+    [Fact]
+    public void FormatLines_EssentialGraph_AnnotatesEnchantSelfLoop()
+    {
+        var spec = new ScenarioSpec(
+            IncludeTestingMerge: false,
+            ImmutableArray.Create(MagicAgencySeed.ActorId),
+            ImmutableArray.Create(
+                new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.EnchantNodeId)));
+        var state = ScenarioBootstrap.Materialize(spec, DefaultConfigs, DefaultActors);
+        var lines = FlowGraphPrinter.FormatLines(state, maxWidth: 65);
+        var enchantLine = lines.First(l => l.Contains("enchant", StringComparison.Ordinal));
+
+        Assert.Contains("──┐", enchantLine);
+        Assert.DoesNotContain("testing", string.Join('\n', lines));
+        Assert.DoesNotContain("merge", string.Join('\n', lines));
     }
 }

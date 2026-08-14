@@ -135,15 +135,16 @@ public static class TickReportPrinter
 
         if (ShowsTimer(node.Type))
         {
+            var period = FormatInt(state.NodeConfigs.Payroll.Period);
             var timer = FormatInt(state.NodeTimers.GetValueOrDefault(nodeId, 0));
             if (previous is null)
             {
-                lines.Add($"  timer: {timer}");
+                lines.Add($"  timer: {FormatWithTarget(timer, period)}");
             }
             else
             {
                 var priorTimer = FormatInt(previous.NodeTimers.GetValueOrDefault(nodeId, 0));
-                lines.Add($"  timer: {FormatChange(priorTimer, timer)}");
+                lines.Add($"  timer: {FormatWithTarget(FormatChange(priorTimer, timer), period)}");
             }
         }
 
@@ -152,15 +153,16 @@ public static class TickReportPrinter
             return lines;
         }
 
+        var effort = FormatRounded(EffortTarget(state.NodeConfigs, node.Type));
         var progress = FormatRounded(state.NodeProgress.GetValueOrDefault(nodeId, 0));
         if (previous is null)
         {
-            lines.Add($"  progress: {progress}");
+            lines.Add($"  progress: {FormatWithTarget(progress, effort)}");
             return lines;
         }
 
         var priorProgress = FormatRounded(previous.NodeProgress.GetValueOrDefault(nodeId, 0));
-        lines.Add($"  progress: {FormatChange(priorProgress, progress)}");
+        lines.Add($"  progress: {FormatWithTarget(FormatChange(priorProgress, progress), effort)}");
         return lines;
     }
 
@@ -240,6 +242,44 @@ public static class TickReportPrinter
 
     private static bool ShowsTimer(NodeTypeId typeId) =>
         typeId == MagicAgencySeed.PayrollTypeId;
+
+    private static double EffortTarget(NodeTypeConfigs configs, NodeTypeId typeId)
+    {
+        if (typeId == MagicAgencySeed.EnchantTypeId)
+        {
+            return configs.Enchant.Effort;
+        }
+
+        if (typeId == MagicAgencySeed.TestingTypeId)
+        {
+            return configs.Testing.Effort;
+        }
+
+        if (typeId == MagicAgencySeed.SellTypeId)
+        {
+            return configs.Sell.Effort;
+        }
+
+        if (typeId == MagicAgencySeed.TreasuryTypeId)
+        {
+            return configs.Treasury.Effort;
+        }
+
+        if (typeId == MagicAgencySeed.PayrollTypeId)
+        {
+            return configs.Payroll.Effort;
+        }
+
+        if (typeId == MagicAgencySeed.MergeTypeId)
+        {
+            return configs.Merge.Effort;
+        }
+
+        throw new InvalidOperationException($"No effort target for node type '{typeId.Value}'.");
+    }
+
+    private static string FormatWithTarget(string current, string target) =>
+        $"{current} / {target}";
 
     private static void AppendPort(
         List<string> lines,

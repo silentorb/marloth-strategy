@@ -67,8 +67,8 @@ Leaf formatting inside left subpanels (and header actors) follows:
 | Ports | Union of the node type’s input and output ports (ordinal by port id). Same-named input/output ports share one committed `PortSignals` stock and one display entry |
 | Money (resource) | Committed stock on the port with change arrows from the prior tick (`previous → current` when different). Tick 0 shows committed stock only. Missing stock displays as `0`; numerics **rounded** to nearest integer |
 | Enchantment (information) | Nested `hash` (abbreviated, 7 hex chars) plus `volume` / `darkness` / `fallacy` aggregate counts when present; absent displays as `0`; counts rounded for display; change arrows from prior committed stock |
-| Progress | Shown for all seed node types (`enchant`, `testing`, `merge`, `sell`, `treasury`, `payroll`). Rounded numeric from `NodeProgress` (default `0`) |
-| Timer | Shown for `payroll` from `NodeTimers` (rounded display as integer string); change arrows when previous state is supplied |
+| Progress | Shown for all seed node types (`enchant`, `testing`, `merge`, `sell`, `treasury`, `payroll`). Rounded numeric from `NodeProgress` (default `0`); clause ends with suffix ` / {effort}` (that node type’s config effort), including after a change arrow |
+| Timer | Shown for `payroll` from `NodeTimers` as integer elapsed; clause ends with suffix ` / {period}` (including after a change arrow) |
 | Payroll money | Seed payroll has a `money` input (wage delivery); empty displays as `0` like other resource ports |
 | Change annotations | When a previous state is supplied, compare rounded display strings per leaf; if different, print `previous → current` (U+2192); if equal, print current only. Tick 0 has no previous state (no arrows). Empty leaves use `0` (never `-`) |
 | Flow graph | Right panel: MSAGL positions and port-anchored edge routes quantized to a character grid; single-line boxed node ids; directed connectors for all port-to-port edges (self-loops annotated); isolated nodes included; top-aligned in the column |

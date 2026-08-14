@@ -14,9 +14,9 @@ public sealed class ScenarioTests
             FallacyConstant: 1),
         new TestingNodeConfig(Effort: 10, FallacyReduction: 5),
         new SellNodeConfig(Effort: 10, PayoutFloor: 0),
-        new TreasuryNodeConfig(Effort: 2),
-        new PayrollNodeConfig(DefaultWage: 10, Period: 5, Effort: 5),
-        new MergeNodeConfig(Effort: 5));
+        new TreasuryNodeConfig(Effort: 1),
+        new PayrollNodeConfig(DefaultWage: 10, Period: 5, Effort: 1),
+        new MergeNodeConfig(Effort: 1));
 
     private static readonly ActorId ConsultantId = new("consultant");
 
@@ -48,7 +48,7 @@ public sealed class ScenarioTests
         Assert.All(state.Assignments, a => Assert.Equal(1m, a.Weight));
         Assert.Equal(100, Assert.IsType<SignalValue.Money>(
             state.PortSignals[new PortKey(MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId)]).Amount);
-        Assert.Equal(5, state.NodeTimers[MagicAgencySeed.PayrollNodeId]);
+        Assert.Equal(0, state.NodeTimers[MagicAgencySeed.PayrollNodeId]);
     }
 
     [Fact]
@@ -72,14 +72,18 @@ public sealed class ScenarioTests
     }
 
     [Fact]
-    public void GraphFactory_Essential_HasEnchantToSellWithoutTestingMerge()
+    public void GraphFactory_Essential_HasEnchantSelfLoopAndSellWithoutTestingMerge()
     {
         var (graph, catalog) = GraphFactory.Create(includeTestingMerge: false);
 
         Assert.Equal(4, graph.Nodes.Count);
         Assert.False(graph.Nodes.ContainsKey(MagicAgencySeed.TestingNodeId));
         Assert.False(graph.Nodes.ContainsKey(MagicAgencySeed.MergeNodeId));
-        Assert.Equal(3, graph.Edges.Count);
+        Assert.Equal(4, graph.Edges.Count);
+        Assert.Contains(
+            graph.Edges.Values,
+            e => e.From.Node == MagicAgencySeed.EnchantNodeId
+                 && e.To.Node == MagicAgencySeed.EnchantNodeId);
         Assert.Contains(
             graph.Edges.Values,
             e => e.From.Node == MagicAgencySeed.EnchantNodeId
@@ -97,12 +101,21 @@ public sealed class ScenarioTests
     }
 
     [Fact]
-    public void GraphFactory_TestingMerge_HasSixNodesAndSevenEdges()
+    public void GraphFactory_TestingMerge_ReplacesEnchantSelfLoopWithEnchantToMerge()
     {
         var (graph, _) = GraphFactory.Create(includeTestingMerge: true);
 
         Assert.Equal(6, graph.Nodes.Count);
         Assert.Equal(7, graph.Edges.Count);
+        Assert.DoesNotContain(
+            graph.Edges.Values,
+            e => e.From.Node == MagicAgencySeed.EnchantNodeId
+                 && e.To.Node == MagicAgencySeed.EnchantNodeId);
+        Assert.Contains(
+            graph.Edges.Values,
+            e => e.From.Node == MagicAgencySeed.EnchantNodeId
+                 && e.To.Node == MagicAgencySeed.MergeNodeId
+                 && e.To.Port == MagicAgencySeed.PrimaryPortId);
         Assert.DoesNotContain(
             graph.Edges.Values,
             e => e.From.Node == MagicAgencySeed.EnchantNodeId

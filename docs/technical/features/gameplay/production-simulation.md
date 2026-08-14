@@ -31,7 +31,7 @@ Enchantment **volume / darkness / fallacy** are discrete unit counts (`int`). Co
 
 Actor **capacity** and per-node **assignment effort** remain `decimal` ratios. Progress gain converts with `(double)(stat × assignmentEffort)`.
 
-Payroll **period** and remaining **timers** are integers (`int`).
+Payroll **period** and elapsed **timers** are integers (`int`).
 
 Console display shows aggregate unit counts and an abbreviated content hash; simulation keeps exact unit sets and full hashes.
 
@@ -71,7 +71,7 @@ Preferred assignments live on `GameState.Assignments`. Each tick, **effective** 
 | `enchant` / `testing` / `sell` | Enchantment on process input port |
 | `merge` | Enchantments on both `primary` and `secondary` input ports |
 | `treasury` | `PendingMoneyMoves` non-empty |
-| `payroll` | Timer remaining is `0` (payday due) |
+| `payroll` | Timer elapsed `>= period` (payday due) |
 
 For each actor, over that actor’s effective assignments: `assignmentEffortPerNode = Capacity × weight / Σ(effective weights)`. Equal weights yield an even split (`Capacity / count`). Weights must be `> 0`; a non-positive weight or zero effective weight sum is fail-fast.  
 Per node: assignment effort = sum of contributions. Unassigned / not effective → `0`.
@@ -114,7 +114,7 @@ Tunable numerics live in `config/node-types/{enchant,testing,merge,sell,treasury
 ### `merge`
 
 - Inputs: `primary`, `secondary` (enchantment); output: `enchantment`.
-- Config: `effort` (seed `5`).
+- Config: `effort` (seed `1`).
 - Stat: `merging` (default `1`).
 - Prerequisite: both inputs present. With assignment effort and progress ≥ effort: consume both; emit resolved block.
 - Resolution: same hash → that block; ancestor/descendant → newer tip; no common ancestor → primary; else three-way merge per property `(P ∩ S) ∪ (P − A) ∪ (S − A)`, new block parent = primary hash.
@@ -129,7 +129,7 @@ Tunable numerics live in `config/node-types/{enchant,testing,merge,sell,treasury
 ### `treasury`
 
 - Input / output: `money` (committed stock on the input; never consumed as process input; successful **Out** applications **emit** on the output for edge routing).
-- Config: `effort` (seed `2`).
+- Config: `effort` (seed `1`).
 - Stat: `treasury` (default `1`).
 - Always residuals the committed money pile.
 - Effective when pending queue non-empty. Gain progress when assigned; each application dequeues **one** move from the start-of-tick queue and subtracts `effort`. **In** adds to the pile. **Out** debits if pile ≥ amount and emits that amount on the money output (routed by edges, e.g. to payroll); otherwise mass-quit (clear actors and assignments), drop the out-move, leave pile unchanged, emit nothing.
@@ -138,11 +138,11 @@ Tunable numerics live in `config/node-types/{enchant,testing,merge,sell,treasury
 ### `payroll`
 
 - Input: `money` (receives routed wage payouts; consumed/disbursed — not residualled across ticks).
-- Config: `defaultWage`, `period`, `effort` (seed `10` / `5` / `5`).
+- Config: `defaultWage`, `period`, `effort` (seed `10` / `5` / `1`).
 - Stat: `payroll` (default `1`).
-- `GameState.NodeTimers[payroll]` is a countdown seeded to `period`.
-- **Timer (no actor):** when start-of-tick `remaining > 0`, end-of-tick sets `remaining - 1`. When start-of-tick `remaining == 0`, payday is due (timer unchanged unless payday application resets it to `period`).
-- **Payday due (start of tick `remaining == 0`):** effective for assignment. Gain progress when assigned; when `progress >= effort`, if wage total `> 0` require at least one funding edge from a treasury `money` port to this node’s `money` input, then enqueue pending outbound for the wage total of all current actors; subtract effort; reset timer to `period`. Missing funding edge with wage total `> 0` is fail-fast. Wage total `0` → reset timer without enqueue.
+- `GameState.NodeTimers[payroll]` is an elapsed count seeded to `0`.
+- **Timer (no actor):** when start-of-tick `elapsed < period`, end-of-tick sets `elapsed + 1`. When start-of-tick `elapsed >= period`, payday is due (timer unchanged unless payday application resets it to `0`).
+- **Payday due (start of tick `elapsed >= period`):** effective for assignment. Gain progress when assigned; when `progress >= effort`, if wage total `> 0` require at least one funding edge from a treasury `money` port to this node’s `money` input, then enqueue pending outbound for the wage total of all current actors; reset progress to `0`; reset timer to `0`. Missing funding edge with wage total `> 0` is fail-fast. Wage total `0` → reset progress and timer without enqueue.
 - Effective wage per actor = actor `Wage` if set, else `defaultWage`. Shortfall / mass-quit runs when treasury applies the out-move.
 - v1: exactly one `payroll` and one `treasury` node in the seed graph; missing/duplicate is fail-fast.
 
@@ -164,7 +164,7 @@ Pipeline (each step returns new data; no mutation of prior state):
 2. **`ResolveEffectiveAssignments` / assignment effort** — Filter preferred assignments by prerequisites; split each actor’s capacity by relative weights over effective rows.
 3. **`ComputeOutputs`** — Node-type-specific behavior using each node’s port inputs, assignment effort, stats, progress, and start-of-tick pending moves. Nodes are independent (no same-tick money chain). Node iteration order must not change results. May enqueue payroll outbound onto a next-pending builder (when a treasury→payroll money funding edge exists); treasury only drains the start-of-tick queue into residuals / actor updates and may emit money on successful outs.
 4. **`CommitSignals`** — Residuals; route outputs (information set if empty / skip if occupied; money to treasury **enqueues inbound** on the pending builder; other money edges **AddResource** as usual, including treasury→payroll wage delivery).
-5. **`AdvancePayrollTimer`** — If payroll remaining `> 0`, decrement by 1 (no auto-pay).
+5. **`AdvancePayrollTimer`** — If payroll elapsed `< period`, increment by 1 (no auto-pay).
 6. **`NextState`** — New signals, updated progress/timers/pending maps, actors/assignments, `Tick + 1`.
 
 Host pattern:
@@ -182,11 +182,11 @@ state = AdvanceTick(state); // mutable binding, immutable values
 Play bootstrap: `ScenarioBootstrap.CreateInitialState(GameConfig)` (loads node configs, actor definitions, and scenario JSON from `config/` under the app base directory; overloads accept explicit configs/actors/pool). `GameConfig.ScenarioPreset` selects a named file `config/scenarios/{name}.json`; null/whitespace generates a random scenario from `SCENARIO_SEED`. Unknown presets, invalid JSON, missing actors, or assignments to absent nodes are fail-fast (`InvalidOperationException` with path context).
 
 - Node types: `enchant` (in/out `enchantment`), `testing` (in/out `enchantment`), `merge` (in `primary`/`secondary`, out `enchantment`), `sell` (in `enchantment`, out `money`), `treasury` (in/out `money`), `payroll` (in `money`). Catalog always includes all six types.
-- **Essential graph:** nodes `enchant`, `sell`, `treasury`, `payroll`; edges `enchant.enchantment` → `sell.enchantment`; `sell.money` → `treasury.money` (pending inbound on commit); `treasury.money` → `payroll.money`.
-- **Testing+merge variation:** add nodes `testing` and `merge`; replace `enchant→sell` with `enchant.enchantment` → `testing.enchantment`; `enchant.enchantment` → `merge.primary`; `testing.enchantment` → `sell.enchantment`; `testing.enchantment` → `merge.secondary`; `merge.enchantment` → `enchant.enchantment`; money edges unchanged.
+- **Essential graph:** nodes `enchant`, `sell`, `treasury`, `payroll`; edges `enchant.enchantment` → `enchant.enchantment` (self-loop); `enchant.enchantment` → `sell.enchantment`; `sell.money` → `treasury.money` (pending inbound on commit); `treasury.money` → `payroll.money`.
+- **Testing+merge variation:** add nodes `testing` and `merge`; replace `enchant→enchant` with `enchant.enchantment` → `merge.primary`; replace `enchant→sell` with `enchant.enchantment` → `testing.enchantment`; `testing.enchantment` → `sell.enchantment`; `testing.enchantment` → `merge.secondary`; `merge.enchantment` → `enchant.enchantment`; money edges unchanged.
 - **Preset `lab01`:** `includeTestingMerge: true`; actors `intern` and `boss` (stats as configured, wages unset). Preferred assignments (weight `1` each): intern → enchant, merge, testing; boss → payroll, sell, treasury.
 - **Actor pool:** `config/scenarios/actor-pool.json` lists eligible actor ids (not every file under `config/actors/`). Random generation: coin-flip testing+merge; 2–4 distinct pool actors; preferred assignments (weight `1`) cover **every** graph node; multi-actor overlap on a node is allowed but sparse (more likely when actors are plentiful relative to nodes). Deterministic for a fixed seed.
-- Initial signals: `enchant.enchantment` = genesis empty block; `treasury.money` = `100`; `EnchantmentBlocks` contains genesis; `NextUnitId` = `1`; progress empty/`0`; payroll timer = `period`; pending money moves empty; `Tick = 0`.
+- Initial signals: `enchant.enchantment` = genesis empty block; `treasury.money` = `100`; `EnchantmentBlocks` contains genesis; `NextUnitId` = `1`; progress empty/`0`; payroll timer = `0`; pending money moves empty; `Tick = 0`.
 
 ## Layout
 

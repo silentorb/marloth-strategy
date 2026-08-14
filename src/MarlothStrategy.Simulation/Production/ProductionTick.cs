@@ -219,7 +219,8 @@ public static class ProductionTick
 
         if (node.Type == MagicAgencySeed.PayrollTypeId)
         {
-            return state.NodeTimers.GetValueOrDefault(nodeId, 0) == 0;
+            var period = state.NodeConfigs.Payroll.Period;
+            return state.NodeTimers.GetValueOrDefault(nodeId, 0) >= period;
         }
 
         return false;
@@ -919,13 +920,13 @@ public static class ProductionTick
         ImmutableDictionary<NodeId, int> timers)
     {
         // Money on the payroll input is disbursed: never written to residuals.
-        var remaining = state.NodeTimers.GetValueOrDefault(nodeId, config.Period);
+        var elapsed = state.NodeTimers.GetValueOrDefault(nodeId, 0);
         var nextProgress = progress;
         var nextPending = appendedPending;
         var nextTimers = timers;
 
-        // Payday due only when start-of-tick remaining is 0.
-        if (remaining == 0 && assignmentEffort > 0m)
+        // Payday due only when start-of-tick elapsed has reached period.
+        if (elapsed >= config.Period && assignmentEffort > 0m)
         {
             nextProgress += ProgressGain(
                 state,
@@ -936,7 +937,8 @@ public static class ProductionTick
 
             if (config.Effort > 0 && nextProgress >= config.Effort)
             {
-                nextProgress -= config.Effort;
+                // One payday per due period: clear progress so excess gain does not carry.
+                nextProgress = 0;
                 var wageTotal = 0.0;
                 foreach (var actor in state.Actors.Values.OrderBy(a => a.Id.Value, StringComparer.Ordinal))
                 {
@@ -955,7 +957,7 @@ public static class ProductionTick
                     nextPending = nextPending.Add(new PendingMoneyMove(MoneyMoveDirection.Out, wageTotal));
                 }
 
-                nextTimers = nextTimers.SetItem(nodeId, config.Period);
+                nextTimers = nextTimers.SetItem(nodeId, 0);
             }
         }
 
@@ -1092,14 +1094,14 @@ public static class ProductionTick
             throw new InvalidOperationException("Payroll period must be a positive integer.");
         }
 
-        var startRemaining = state.NodeTimers.GetValueOrDefault(payrollNodeId, period);
-        if (startRemaining > 0)
+        var startElapsed = state.NodeTimers.GetValueOrDefault(payrollNodeId, 0);
+        if (startElapsed < period)
         {
-            // Countdown ticks without actors; payday reset (if any) is ignored when not due.
-            return timersAfterCompute.SetItem(payrollNodeId, startRemaining - 1);
+            // Count-up ticks without actors; payday reset (if any) is ignored when not due.
+            return timersAfterCompute.SetItem(payrollNodeId, startElapsed + 1);
         }
 
-        // Still due (0) or reset to period by payday application this tick.
+        // Still due (elapsed >= period) or reset to 0 by payday application this tick.
         return timersAfterCompute;
     }
 

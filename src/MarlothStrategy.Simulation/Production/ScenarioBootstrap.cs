@@ -123,7 +123,7 @@ public static class ScenarioBootstrap
                 new SignalValue.Money(StartingTreasuryMoney));
 
         var timers = ImmutableDictionary<NodeId, int>.Empty
-            .Add(MagicAgencySeed.PayrollNodeId, nodeConfigs.Payroll.Period);
+            .Add(MagicAgencySeed.PayrollNodeId, 0);
 
         var blocks = ImmutableDictionary<string, EnchantmentBlock>.Empty
             .Add(genesis.Hash, genesis);
