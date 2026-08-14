@@ -35,14 +35,17 @@ public static class TickReportPrinter
             .OrderBy(id => id.Value, StringComparer.Ordinal)
             .ToArray();
 
+        // Left:right interior = 1:2 so the flow graph has more horizontal room.
+        var leftInteriorWidth = PanelLayout.LeftInteriorWidthForTotal(width);
+        // WritePadded reserves one cell of left margin inside the column.
+        var usableLeftWidth = Math.Max(1, leftInteriorWidth - 1);
+
         var leftSubpanels = new List<IReadOnlyList<string>>(nodes.Length);
         foreach (var nodeId in nodes)
         {
-            leftSubpanels.Add(FormatNodeLines(state, previous, nodeId));
+            leftSubpanels.Add(FormatNodeLines(state, previous, nodeId, usableLeftWidth));
         }
 
-        // Left:right interior = 1:2 so the flow graph has more horizontal room.
-        var leftInteriorWidth = PanelLayout.LeftInteriorWidthForTotal(width);
         var rightInteriorWidth = width - leftInteriorWidth - 3;
         var rightLines = FlowGraphPrinter.FormatLines(state, rightInteriorWidth);
 
@@ -90,6 +93,17 @@ public static class TickReportPrinter
     }
 
     private static List<string> FormatNodeLines(
+        GameState state,
+        GameState? previous,
+        NodeId nodeId,
+        int usableWidth)
+    {
+        var stateLines = FormatNodeStateLines(state, previous, nodeId);
+        var assignmentLines = FormatNodeAssignmentLines(state, nodeId);
+        return MergeNodeColumns(stateLines, assignmentLines, usableWidth);
+    }
+
+    private static List<string> FormatNodeStateLines(
         GameState state,
         GameState? previous,
         NodeId nodeId)
@@ -141,6 +155,72 @@ public static class TickReportPrinter
         var priorProgress = FormatRounded(previous.NodeProgress.GetValueOrDefault(nodeId, 0));
         lines.Add($"  progress: {FormatChange(priorProgress, progress)}");
         return lines;
+    }
+
+    private static List<string> FormatNodeAssignmentLines(GameState state, NodeId nodeId)
+    {
+        return state.Assignments
+            .Where(a => a.NodeId == nodeId)
+            .OrderBy(a => a.ActorId.Value, StringComparer.Ordinal)
+            .Select(a => $"{a.ActorId.Value} {FormatWeight(a.Weight)}")
+            .ToList();
+    }
+
+    /// <summary>
+    /// Horizontally splits a node subpanel: state on the left, preferred assignments on the right.
+    /// </summary>
+    private static List<string> MergeNodeColumns(
+        IReadOnlyList<string> stateLines,
+        IReadOnlyList<string> assignmentLines,
+        int usableWidth)
+    {
+        if (usableWidth < 3)
+        {
+            // Too narrow for a split — prefer state content.
+            return stateLines.ToList();
+        }
+
+        // Right column sized for short "actor weight" rows; prefer room for state leaves.
+        var assignWidth = Math.Clamp(usableWidth / 4, 8, 10);
+        var stateWidth = usableWidth - 1 - assignWidth;
+        var rowCount = Math.Max(1, Math.Max(stateLines.Count, assignmentLines.Count));
+        var merged = new List<string>(rowCount);
+
+        for (var i = 0; i < rowCount; i++)
+        {
+            var left = i < stateLines.Count ? stateLines[i] : string.Empty;
+            var right = i < assignmentLines.Count ? assignmentLines[i] : string.Empty;
+            merged.Add(
+                $"{ClipPad(left, stateWidth)}{BoxDrawing.SingleVertical}{ClipPad(right, assignWidth)}");
+        }
+
+        return merged;
+    }
+
+    private static string ClipPad(string text, int width)
+    {
+        if (width <= 0)
+        {
+            return string.Empty;
+        }
+
+        if (text.Length > width)
+        {
+            return text[..width];
+        }
+
+        return text.PadRight(width);
+    }
+
+    private static string FormatWeight(decimal weight)
+    {
+        // Relative ratios: show whole numbers without a trailing ".0".
+        if (weight == decimal.Truncate(weight))
+        {
+            return decimal.Truncate(weight).ToString(CultureInfo.InvariantCulture);
+        }
+
+        return weight.ToString(CultureInfo.InvariantCulture);
     }
 
     private static bool ShowsProgress(NodeTypeId typeId) =>

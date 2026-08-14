@@ -14,4 +14,4 @@ public sealed record Actor(
     ImmutableDictionary<string, double> Stats,
     double? Wage = null);
 
-public sealed record Assignment(ActorId ActorId, NodeId NodeId);
+public sealed record Assignment(ActorId ActorId, NodeId NodeId, decimal Weight = 1m);

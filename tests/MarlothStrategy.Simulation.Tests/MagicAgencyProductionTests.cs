@@ -19,14 +19,24 @@ public sealed class MagicAgencyProductionTests
         new MergeNodeConfig(Effort: 5));
 
     private static readonly ImmutableDictionary<ActorId, Actor> DefaultActors =
-        ImmutableDictionary<ActorId, Actor>.Empty.Add(
-            MagicAgencySeed.ActorId,
-            new Actor(
+        ImmutableDictionary<ActorId, Actor>.Empty
+            .Add(
                 MagicAgencySeed.ActorId,
-                Capacity: 1.0m,
-                ImmutableDictionary<string, double>.Empty
-                    .Add(ActorStatKeys.Enchanting, 10)
-                    .Add(ActorStatKeys.Sales, 10)));
+                new Actor(
+                    MagicAgencySeed.ActorId,
+                    Capacity: 1.0m,
+                    ImmutableDictionary<string, double>.Empty
+                        .Add(ActorStatKeys.Enchanting, 10)
+                        .Add(ActorStatKeys.Sales, 10)))
+            .Add(
+                MagicAgencySeed.BossActorId,
+                new Actor(
+                    MagicAgencySeed.BossActorId,
+                    Capacity: 1.0m,
+                    ImmutableDictionary<string, double>.Empty
+                        .Add(ActorStatKeys.Sales, 10)
+                        .Add(ActorStatKeys.Payroll, 10)
+                        .Add(ActorStatKeys.Treasury, 10)));
 
     private static GameState Seed(NodeTypeConfigs? configs = null) =>
         MagicAgencySeed.CreateInitialState(configs ?? DefaultConfigs, DefaultActors);
@@ -107,7 +117,27 @@ public sealed class MagicAgencyProductionTests
                  && e.To.Node == MagicAgencySeed.EnchantNodeId);
 
         Assert.Equal(6, state.Assignments.Length);
-        Assert.Contains(state.Assignments, a => a.NodeId == MagicAgencySeed.MergeNodeId);
+        Assert.Contains(
+            state.Assignments,
+            a => a.ActorId == MagicAgencySeed.ActorId && a.NodeId == MagicAgencySeed.EnchantNodeId);
+        Assert.Contains(
+            state.Assignments,
+            a => a.ActorId == MagicAgencySeed.ActorId && a.NodeId == MagicAgencySeed.MergeNodeId);
+        Assert.Contains(
+            state.Assignments,
+            a => a.ActorId == MagicAgencySeed.ActorId && a.NodeId == MagicAgencySeed.TestingNodeId);
+        Assert.Contains(
+            state.Assignments,
+            a => a.ActorId == MagicAgencySeed.BossActorId && a.NodeId == MagicAgencySeed.PayrollNodeId);
+        Assert.Contains(
+            state.Assignments,
+            a => a.ActorId == MagicAgencySeed.BossActorId && a.NodeId == MagicAgencySeed.SellNodeId);
+        Assert.Contains(
+            state.Assignments,
+            a => a.ActorId == MagicAgencySeed.BossActorId && a.NodeId == MagicAgencySeed.TreasuryNodeId);
+        Assert.All(state.Assignments, a => Assert.Equal(1m, a.Weight));
+        Assert.Equal(2, state.Actors.Count);
+        Assert.True(state.Actors.ContainsKey(MagicAgencySeed.BossActorId));
         Assert.Equal(5, state.NodeTimers[MagicAgencySeed.PayrollNodeId]);
         Assert.Equal(DefaultConfigs, state.NodeConfigs);
         AssertCounts(
@@ -180,8 +210,9 @@ public sealed class MagicAgencyProductionTests
                 Capacity: 1.0m,
                 ImmutableDictionary<string, double>.Empty.Add(ActorStatKeys.Enchanting, 30)));
 
-        var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, actors) with
+        var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors) with
         {
+            Actors = actors,
             Assignments = ImmutableArray.Create(
                 new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.EnchantNodeId)),
         };
@@ -211,8 +242,9 @@ public sealed class MagicAgencyProductionTests
 
         var stock = Enchant(20, 2, 12);
         var state = WithEnchantmentStock(
-            MagicAgencySeed.CreateInitialState(DefaultConfigs, actors) with
+            MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors) with
             {
+                Actors = actors,
                 Assignments = ImmutableArray.Create(
                     new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.TestingNodeId)),
                 PortSignals = ImmutableDictionary<PortKey, SignalValue>.Empty.Add(
@@ -258,8 +290,9 @@ public sealed class MagicAgencyProductionTests
 
         var stock = Enchant(10, 1, 8);
         var state = WithEnchantmentStock(
-            MagicAgencySeed.CreateInitialState(DefaultConfigs, actors) with
+            MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors) with
             {
+                Actors = actors,
                 Assignments = ImmutableArray.Create(
                     new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.TestingNodeId)),
                 PortSignals = ImmutableDictionary<PortKey, SignalValue>.Empty.Add(
@@ -298,8 +331,9 @@ public sealed class MagicAgencyProductionTests
             .Add(genesis.Hash, genesis)
             .Add(child.Hash, child);
 
-        var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, actors) with
+        var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors) with
         {
+            Actors = actors,
             Assignments = ImmutableArray.Create(
                 new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.MergeNodeId)),
             PortSignals = ImmutableDictionary<PortKey, SignalValue>.Empty
@@ -346,8 +380,9 @@ public sealed class MagicAgencyProductionTests
             .Add(primary.Hash, primary.Block)
             .Add(secondary.Hash, secondary.Block);
 
-        var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, actors) with
+        var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors) with
         {
+            Actors = actors,
             Assignments = ImmutableArray.Create(
                 new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.MergeNodeId)),
             PortSignals = ImmutableDictionary<PortKey, SignalValue>.Empty
@@ -387,8 +422,9 @@ public sealed class MagicAgencyProductionTests
 
         var stock = Enchant(10, 1, 1);
         var afterSell = WithEnchantmentStock(
-            MagicAgencySeed.CreateInitialState(DefaultConfigs, actors) with
+            MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors) with
             {
+                Actors = actors,
                 Assignments = ImmutableArray.Create(
                     new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.SellNodeId)),
                 PortSignals = ImmutableDictionary<PortKey, SignalValue>.Empty.Add(
@@ -438,8 +474,9 @@ public sealed class MagicAgencyProductionTests
             Payroll = new PayrollNodeConfig(DefaultWage: 10, Period: 1, Effort: 5),
         };
 
-        var state = MagicAgencySeed.CreateInitialState(configs, actors) with
+        var state = MagicAgencySeed.CreateInitialState(configs, DefaultActors) with
         {
+            Actors = actors,
             Assignments = ImmutableArray.Create(
                 new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.PayrollNodeId)),
             PortSignals = ImmutableDictionary<PortKey, SignalValue>.Empty.Add(
@@ -492,8 +529,9 @@ public sealed class MagicAgencyProductionTests
                 Capacity: 1.0m,
                 ImmutableDictionary<string, double>.Empty.Add(ActorStatKeys.Treasury, 2)));
 
-        var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, actors) with
+        var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors) with
         {
+            Actors = actors,
             Assignments = ImmutableArray.Create(
                 new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.TreasuryNodeId)),
             PortSignals = ImmutableDictionary<PortKey, SignalValue>.Empty.Add(
@@ -523,13 +561,14 @@ public sealed class MagicAgencyProductionTests
                 Capacity: 1.0m,
                 ImmutableDictionary<string, double>.Empty.Add(ActorStatKeys.Payroll, 5)));
 
-        var seeded = MagicAgencySeed.CreateInitialState(DefaultConfigs, actors);
+        var seeded = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors);
         var edgesWithoutFunding = seeded.Graph.Edges
             .Where(kv => kv.Key.Value != "treasury-to-payroll")
             .ToImmutableDictionary();
 
         var state = seeded with
         {
+            Actors = actors,
             Graph = new NodeGraph(seeded.Graph.Nodes, edgesWithoutFunding),
             Assignments = ImmutableArray.Create(
                 new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.PayrollNodeId)),
@@ -556,8 +595,9 @@ public sealed class MagicAgencyProductionTests
                 ImmutableDictionary<string, double>.Empty.Add(ActorStatKeys.Payroll, 5),
                 Wage: 7));
 
-        var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, actors) with
+        var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors) with
         {
+            Actors = actors,
             Assignments = ImmutableArray.Create(
                 new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.PayrollNodeId)),
             PortSignals = ImmutableDictionary<PortKey, SignalValue>.Empty.Add(
@@ -659,6 +699,78 @@ public sealed class MagicAgencyProductionTests
     }
 
     [Fact]
+    public void ActorConfigLoader_LoadsBossWithStatsAndNoWage()
+    {
+        var actors = ActorConfigLoader.LoadFromBaseDirectory();
+        var boss = actors[MagicAgencySeed.BossActorId];
+        Assert.Equal(1.0m, boss.Capacity);
+        Assert.Null(boss.Wage);
+        Assert.Equal(10, boss.Stats[ActorStatKeys.Sales]);
+        Assert.Equal(10, boss.Stats[ActorStatKeys.Payroll]);
+        Assert.Equal(10, boss.Stats[ActorStatKeys.Treasury]);
+    }
+
+    [Fact]
+    public void ResolveEffortByNode_SplitsCapacityByRelativeWeights()
+    {
+        var actors = ImmutableDictionary<ActorId, Actor>.Empty.Add(
+            MagicAgencySeed.ActorId,
+            new Actor(
+                MagicAgencySeed.ActorId,
+                Capacity: 1.0m,
+                ImmutableDictionary<string, double>.Empty
+                    .Add(ActorStatKeys.Enchanting, 1)
+                    .Add(ActorStatKeys.Testing, 1)));
+
+        var testingStock = Enchant(1, 0, 0);
+        var state = WithEnchantmentStock(
+            MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors) with
+            {
+                Actors = actors,
+                Assignments = ImmutableArray.Create(
+                    new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.EnchantNodeId, Weight: 1m),
+                    new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.TestingNodeId, Weight: 3m)),
+            },
+            new PortKey(MagicAgencySeed.TestingNodeId, MagicAgencySeed.EnchantmentPortId),
+            testingStock);
+
+        var effort = ProductionTick.ResolveEffortByNode(state);
+
+        Assert.Equal(0.25m, effort[MagicAgencySeed.EnchantNodeId]);
+        Assert.Equal(0.75m, effort[MagicAgencySeed.TestingNodeId]);
+    }
+
+    [Fact]
+    public void ResolveEffortByNode_EvenWeightsSplitCapacityEqually()
+    {
+        var actors = ImmutableDictionary<ActorId, Actor>.Empty.Add(
+            MagicAgencySeed.ActorId,
+            new Actor(
+                MagicAgencySeed.ActorId,
+                Capacity: 1.0m,
+                ImmutableDictionary<string, double>.Empty
+                    .Add(ActorStatKeys.Enchanting, 1)
+                    .Add(ActorStatKeys.Testing, 1)));
+
+        var testingStock = Enchant(1, 0, 0);
+        var state = WithEnchantmentStock(
+            MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors) with
+            {
+                Actors = actors,
+                Assignments = ImmutableArray.Create(
+                    new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.EnchantNodeId, Weight: 1m),
+                    new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.TestingNodeId, Weight: 1m)),
+            },
+            new PortKey(MagicAgencySeed.TestingNodeId, MagicAgencySeed.EnchantmentPortId),
+            testingStock);
+
+        var effort = ProductionTick.ResolveEffortByNode(state);
+
+        Assert.Equal(0.5m, effort[MagicAgencySeed.EnchantNodeId]);
+        Assert.Equal(0.5m, effort[MagicAgencySeed.TestingNodeId]);
+    }
+
+    [Fact]
     public void GetStat_UsesDefaultWhenMissing()
     {
         var actor = new Actor(
@@ -703,8 +815,9 @@ public sealed class MagicAgencyProductionTests
 
         var testingStock = Enchant(10, 1, 1, nextUnitId: 1);
         var sellStock = Enchant(9, 0, 0, nextUnitId: 100);
-        var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, actors) with
+        var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors) with
         {
+            Actors = actors,
             Assignments = ImmutableArray.Create(
                 new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.TestingNodeId)),
             PortSignals = ImmutableDictionary<PortKey, SignalValue>.Empty

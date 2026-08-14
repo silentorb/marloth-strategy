@@ -30,14 +30,14 @@ The first domain is a **magic agency** that creates enchantments as a service.
 ## Actors, stats, wages, and assignment
 
 - An **actor** has a **capacity**, a dictionary of **stats** (e.g. `enchanting`, `testing`, `sales`, `treasury`, `payroll`), and an optional **wage**. If wage is unset, the payroll node’s **`defaultWage`** applies.
-- Preferred **assignments** list which nodes an actor may operate. Each tick, only nodes whose **prerequisites** are met become **effective** assignments. Actors are not assigned to nodes that fail prerequisites that tick.
+- Preferred **assignments** list which nodes an actor may operate, each with a positive **weight** (relative ratio). Each tick, only nodes whose **prerequisites** are met become **effective** assignments. Actors are not assigned to nodes that fail prerequisites that tick.
 - **Every** seed node type uses a progress system and requires an actor to apply work (payroll’s **timer** alone is the exception—see payroll below).
 - Prerequisites:
   - `enchant` / `testing` / `sell`: an enchantment on the process input
   - `merge`: enchantments on both `primary` and `secondary` inputs
   - `treasury`: at least one pending money move
   - `payroll`: payday due (timer remaining is `0`)
-- When an actor has multiple effective assignments, capacity is split equally: **assignment effort** = `capacity / effective count` for that actor. Efforts from several actors on one node **add**.
+- When an actor has multiple effective assignments, capacity is split by relative weights: **assignment effort** = `capacity × weight / Σ(effective weights)` for that actor. Equal weights yield an even split. Efforts from several actors on one node **add**.
 - Unassigned process nodes do nothing that tick (except payroll timer countdown).
 - Progress gain on a node is `stat × assignmentEffort` for the relevant stat. If an actor lacks that stat, the default is **1**.
 
@@ -65,15 +65,15 @@ Do not use “man/manning” in product language; use **assignment** / **assigne
 
 | Piece | Detail |
 |-------|--------|
-| Actors | One actor (`intern`), capacity `1.0`, stats `enchanting: 10`, `sales: 10`, no explicit wage (from `config/actors/intern.json`) |
+| Actors | Two actors from JSON: `intern` (capacity `1.0`, stats `enchanting: 10`, `sales: 10`) and `boss` (capacity `1.0`, stats `sales: 10`, `payroll: 10`, `treasury: 10`); wages unset |
 | Nodes | `enchant` — mutate or pass-through; `testing` — remove fallacy units; `merge` — combine primary/secondary branches; `sell` — consume enchantment, emit payout; `treasury` — store money via pending moves; `payroll` — timer + payday enqueue + money input |
 | Enchant formula | On each mutation: append `volumeDelta` volume units, `darknessDelta` darkness units, and `(darknessCount + fallacyConstant)` fallacy units (defaults `10` / `1` / `1`). Required work: `effort + darknessCount` |
 | Testing formula | On each application: remove `fallacyReduction × effectiveActorCount` fallacy units by ascending id (defaults `effort: 10`, `fallacyReduction: 5`) |
 | Merge formula | Effort `5` (lower than enchant). Fast-forward / primary-on-divergence / else three-way set merge per property: omit ancestor units missing from either side; otherwise union |
 | Sell formula | payout = `max(payoutFloor, volumeCount - fallacyCount)` (default `payoutFloor=0`) |
 | Graph | Enchantment **fans out**: `enchant` → `testing` and `enchant` → `merge.primary`; `testing` → `sell` and `testing` → `merge.secondary`; `merge` → `enchant`; money: `sell.money` → treasury pending inbound; `treasury.money` → `payroll.money` |
-| Assignment | Preferred: `intern` → `enchant`, `testing`, `merge`, `sell`, `treasury`, `payroll`; effective set filtered by prerequisites |
-| Work / payroll | Config `effort: 10` on enchant/testing/sell; merge `effort: 5`; treasury `effort: 2`; payroll `defaultWage: 10`, `period: 5`, `effort: 5`; progress gain uses actor stats × assignment effort (`merging` default `1`) |
+| Assignment | Preferred (weight `1` each): `intern` → `enchant`, `merge`, `testing`; `boss` → `payroll`, `sell`, `treasury`; effective set filtered by prerequisites; capacity split by relative weights |
+| Work / payroll | Config `effort: 10` on enchant/testing/sell; merge `effort: 5`; treasury `effort: 2`; payroll `defaultWage: 10`, `period: 5`, `effort: 5`; progress gain uses actor stats × assignment effort (`merging` default `1`); wage total covers **all** roster actors |
 | Config | Node numerics in `config/node-types/{enchant,testing,merge,sell,treasury,payroll}.json`; actors in `config/actors/*.json`; port layouts and seed wiring stay in code |
 | Starting stocks | Seed primes ports: `enchant` enchantment = genesis empty block; `treasury` money = `100`; sell/testing/merge empty; payroll timer = `period`; pending money moves empty; block map holds genesis; node progress `0` |
 

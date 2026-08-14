@@ -1,0 +1,9 @@
+{
+  "id": "boss",
+  "capacity": 1.0,
+  "stats": {
+    "sales": 10,
+    "payroll": 10,
+    "treasury": 10
+  }
+}

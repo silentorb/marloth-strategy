@@ -20,14 +20,24 @@ public sealed class TickReportPrinterTests
         new MergeNodeConfig(Effort: 5));
 
     private static readonly ImmutableDictionary<ActorId, Actor> DefaultActors =
-        ImmutableDictionary<ActorId, Actor>.Empty.Add(
-            MagicAgencySeed.ActorId,
-            new Actor(
+        ImmutableDictionary<ActorId, Actor>.Empty
+            .Add(
                 MagicAgencySeed.ActorId,
-                Capacity: 1.0m,
-                ImmutableDictionary<string, double>.Empty
-                    .Add(ActorStatKeys.Enchanting, 10)
-                    .Add(ActorStatKeys.Sales, 10)));
+                new Actor(
+                    MagicAgencySeed.ActorId,
+                    Capacity: 1.0m,
+                    ImmutableDictionary<string, double>.Empty
+                        .Add(ActorStatKeys.Enchanting, 10)
+                        .Add(ActorStatKeys.Sales, 10)))
+            .Add(
+                MagicAgencySeed.BossActorId,
+                new Actor(
+                    MagicAgencySeed.BossActorId,
+                    Capacity: 1.0m,
+                    ImmutableDictionary<string, double>.Empty
+                        .Add(ActorStatKeys.Sales, 10)
+                        .Add(ActorStatKeys.Payroll, 10)
+                        .Add(ActorStatKeys.Treasury, 10)));
 
     [Fact]
     public void FormatScreen_Tick0_UsesPanelFrameAndNodeContent()
@@ -40,8 +50,11 @@ public sealed class TickReportPrinterTests
         Assert.StartsWith($"{BoxDrawing.DoubleTopLeft}", normalized);
         Assert.Contains("Marloth Strategy", text);
         Assert.Contains("Tick 0", text);
-        Assert.Contains("actors: intern", text);
+        Assert.Contains("actors: boss, intern", text);
         Assert.Contains("enchant:", text);
+        Assert.Contains("intern 1", text);
+        Assert.Contains("boss 1", text);
+        Assert.Contains($"{BoxDrawing.SingleVertical}", text);
         Assert.Contains("  enchantment:", text);
         Assert.Contains($"    hash: {genesis.AbbreviatedHash}", text);
         Assert.Contains("    volume: 0", text);
@@ -77,7 +90,7 @@ public sealed class TickReportPrinterTests
         var normalized = text.Replace("\r\n", "\n");
 
         Assert.Contains("Tick 1", normalized);
-        Assert.Contains("actors: intern", normalized);
+        Assert.Contains("actors: boss, intern", normalized);
         Assert.Contains("volume: 0 \u2192 10", normalized);
         Assert.Contains("timer: 5 \u2192 4", normalized);
         Assert.Contains("treasury:", normalized);
@@ -117,7 +130,7 @@ public sealed class TickReportPrinterTests
         var text = TickReportPrinter.FormatScreen(current, previous, width: PanelLayout.DefaultWidth);
         var normalized = text.Replace("\r\n", "\n");
 
-        Assert.Contains("actors: intern \u2192 0", normalized);
+        Assert.Contains("actors: boss, intern \u2192 0", normalized);
         Assert.Contains("money: 100 \u2192 80", normalized);
         Assert.Contains("progress: 0 \u2192 1", normalized);
         Assert.Contains("volume: 0 \u2192 10", text);

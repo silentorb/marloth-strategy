@@ -117,10 +117,27 @@ public static class ProductionTick
                     $"Assignment references unknown actor '{group.Key}'.");
             }
 
-            var count = group.Count();
-            var share = actor.Capacity / count;
+            var weightSum = 0m;
             foreach (var assignment in group)
             {
+                if (assignment.Weight <= 0m)
+                {
+                    throw new InvalidOperationException(
+                        $"Assignment weight for actor '{group.Key}' on node '{assignment.NodeId}' must be positive.");
+                }
+
+                weightSum += assignment.Weight;
+            }
+
+            if (weightSum == 0m)
+            {
+                throw new InvalidOperationException(
+                    $"Effective assignment weight sum for actor '{group.Key}' must be positive.");
+            }
+
+            foreach (var assignment in group)
+            {
+                var share = actor.Capacity * assignment.Weight / weightSum;
                 shares.Add((assignment, share));
             }
         }

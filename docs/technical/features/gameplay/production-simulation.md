@@ -46,7 +46,7 @@ Identifiers are strings (or thin string wrappers): `NodeId`, `EdgeId`, `NodeType
 | `SignalValue` | Typed payloads: resource `Money(double)` or information `Enchantment(EnchantmentBlock)` |
 | `EnchantmentBlock` | Content-addressed block: `Hash`, `ParentHash`, ordered unique unit-id arrays for volume/darkness/fallacy |
 | `Actor` | `Id`, `Capacity` (`decimal`), `Stats` (`string` → `double`), optional `Wage` (`double?`) |
-| `Assignment` | Preferred `ActorId` → `NodeId` (many nodes per actor) |
+| `Assignment` | Preferred `ActorId` → `NodeId` with positive relative `Weight` (`decimal`, default `1`) (many nodes per actor) |
 | `PendingMoneyMove` | FIFO treasury queue entry: direction `In` / `Out` + `Amount` |
 | `NodeTypeConfigs` | Per-type behavior numerics loaded from JSON and attached to state |
 | `GameState` | Graph + catalog + port signals + actors + preferred assignments + node configs + **node progress** + **node timers** + **pending money moves** + **enchantment block map** + **next unit id** + `Tick` |
@@ -73,7 +73,7 @@ Preferred assignments live on `GameState.Assignments`. Each tick, **effective** 
 | `treasury` | `PendingMoneyMoves` non-empty |
 | `payroll` | Timer remaining is `0` (payday due) |
 
-For each actor, `assignmentEffortPerNode = Capacity / count(effective assignments of that actor)`.  
+For each actor, over that actor’s effective assignments: `assignmentEffortPerNode = Capacity × weight / Σ(effective weights)`. Equal weights yield an even split (`Capacity / count`). Weights must be `> 0`; a non-positive weight or zero effective weight sum is fail-fast.  
 Per node: assignment effort = sum of contributions. Unassigned / not effective → `0`.
 
 Progress gain on a node = sum over effectively assigned actors of `GetStat(actor, key, default) × share`, with defaults `enchanting` / `testing` / `sales` / `merging` / `treasury` / `payroll` → `1`.
@@ -161,7 +161,7 @@ ProductionTickResult AdvanceTickWithReport(GameState state);
 Pipeline (each step returns new data; no mutation of prior state):
 
 1. **`ResolveInputs`** — For each node input port, take the value already committed on that port.
-2. **`ResolveEffectiveAssignments` / assignment effort** — Filter preferred assignments by prerequisites; split capacity.
+2. **`ResolveEffectiveAssignments` / assignment effort** — Filter preferred assignments by prerequisites; split each actor’s capacity by relative weights over effective rows.
 3. **`ComputeOutputs`** — Node-type-specific behavior using each node’s port inputs, assignment effort, stats, progress, and start-of-tick pending moves. Nodes are independent (no same-tick money chain). Node iteration order must not change results. May enqueue payroll outbound onto a next-pending builder (when a treasury→payroll money funding edge exists); treasury only drains the start-of-tick queue into residuals / actor updates and may emit money on successful outs.
 4. **`CommitSignals`** — Residuals; route outputs (information set if empty / skip if occupied; money to treasury **enqueues inbound** on the pending builder; other money edges **AddResource** as usual, including treasury→payroll wage delivery).
 5. **`AdvancePayrollTimer`** — If payroll remaining `> 0`, decrement by 1 (no auto-pay).
@@ -182,7 +182,7 @@ Factory: `MagicAgencySeed.CreateInitialState()` (loads node configs and actors f
 - Node types: `enchant` (in/out `enchantment`), `testing` (in/out `enchantment`), `merge` (in `primary`/`secondary`, out `enchantment`), `sell` (in `enchantment`, out `money`), `treasury` (in/out `money`), `payroll` (in `money`).
 - Nodes: `enchant`, `testing`, `merge`, `sell`, `treasury`, `payroll`.
 - Edges: `enchant.enchantment` → `testing.enchantment`; `enchant.enchantment` → `merge.primary`; `testing.enchantment` → `sell.enchantment`; `testing.enchantment` → `merge.secondary`; `merge.enchantment` → `enchant.enchantment`; `sell.money` → `treasury.money` (pending inbound on commit); `treasury.money` → `payroll.money` (wage funding / out delivery).
-- Actor `intern` from JSON (capacity `1.0`, stats as configured, wage unset), preferred assignments to enchant, testing, merge, sell, treasury, and payroll.
+- Actors from JSON: `intern` (capacity `1.0`, stats as configured, wage unset) and `boss` (capacity `1.0`, stats as configured, wage unset). Preferred assignments (weight `1` each): intern → enchant, merge, testing; boss → payroll, sell, treasury.
 - Initial signals: `enchant.enchantment` = genesis empty block; `treasury.money` = `100`; `EnchantmentBlocks` contains genesis; `NextUnitId` = `1`; progress empty/`0`; payroll timer = `period`; pending money moves empty; `Tick = 0`.
 
 ## Layout

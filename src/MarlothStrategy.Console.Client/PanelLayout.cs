@@ -3,7 +3,7 @@ namespace MarlothStrategy.Console.Client;
 /// <summary>Composes the top status panel and bottom split (stacked left subpanels | right panel).</summary>
 public static class PanelLayout
 {
-    public const int DefaultWidth = 100;
+    public const int DefaultWidth = 120;
 
     /// <summary>Left column interior width for a left:right = 1:2 bottom split.</summary>
     public static int LeftInteriorWidthForTotal(int totalWidth)

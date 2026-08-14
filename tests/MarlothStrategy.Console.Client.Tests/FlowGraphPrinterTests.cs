@@ -18,14 +18,24 @@ public sealed class FlowGraphPrinterTests
         new MergeNodeConfig(Effort: 5));
 
     private static readonly ImmutableDictionary<ActorId, Actor> DefaultActors =
-        ImmutableDictionary<ActorId, Actor>.Empty.Add(
-            MagicAgencySeed.ActorId,
-            new Actor(
+        ImmutableDictionary<ActorId, Actor>.Empty
+            .Add(
                 MagicAgencySeed.ActorId,
-                Capacity: 1.0m,
-                ImmutableDictionary<string, double>.Empty
-                    .Add(ActorStatKeys.Enchanting, 10)
-                    .Add(ActorStatKeys.Sales, 10)));
+                new Actor(
+                    MagicAgencySeed.ActorId,
+                    Capacity: 1.0m,
+                    ImmutableDictionary<string, double>.Empty
+                        .Add(ActorStatKeys.Enchanting, 10)
+                        .Add(ActorStatKeys.Sales, 10)))
+            .Add(
+                MagicAgencySeed.BossActorId,
+                new Actor(
+                    MagicAgencySeed.BossActorId,
+                    Capacity: 1.0m,
+                    ImmutableDictionary<string, double>.Empty
+                        .Add(ActorStatKeys.Sales, 10)
+                        .Add(ActorStatKeys.Payroll, 10)
+                        .Add(ActorStatKeys.Treasury, 10)));
 
     [Fact]
     public void FormatLines_SeedGraph_ShowsBranchingSpatialLayout()

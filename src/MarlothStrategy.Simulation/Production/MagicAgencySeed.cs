@@ -20,6 +20,7 @@ public static class MagicAgencySeed
     public static readonly NodeId MergeNodeId = new("merge");
 
     public static readonly ActorId ActorId = new("intern");
+    public static readonly ActorId BossActorId = new("boss");
 
     public static readonly PortId MoneyPortId = new("money");
     public static readonly PortId EnchantmentPortId = new("enchantment");
@@ -45,6 +46,12 @@ public static class MagicAgencySeed
         {
             throw new InvalidOperationException(
                 $"Magic agency seed requires actor '{ActorId}'.");
+        }
+
+        if (!actors.ContainsKey(BossActorId))
+        {
+            throw new InvalidOperationException(
+                $"Magic agency seed requires actor '{BossActorId}'.");
         }
 
         if (nodeConfigs.Payroll.Period <= 0)
@@ -155,11 +162,11 @@ public static class MagicAgencySeed
 
         var assignments = ImmutableArray.Create(
             new Assignment(ActorId, EnchantNodeId),
+            new Assignment(ActorId, MergeNodeId),
             new Assignment(ActorId, TestingNodeId),
-            new Assignment(ActorId, SellNodeId),
-            new Assignment(ActorId, TreasuryNodeId),
-            new Assignment(ActorId, PayrollNodeId),
-            new Assignment(ActorId, MergeNodeId));
+            new Assignment(BossActorId, PayrollNodeId),
+            new Assignment(BossActorId, SellNodeId),
+            new Assignment(BossActorId, TreasuryNodeId));
 
         var genesis = EnchantmentBlock.CreateGenesis();
         var signals = ImmutableDictionary<PortKey, SignalValue>.Empty

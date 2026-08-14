@@ -5,7 +5,7 @@ public sealed class PanelLayoutTests
     [Fact]
     public void LeftInteriorWidthForTotal_DefaultWidth_IsOneThirdInterior()
     {
-        Assert.Equal(100, PanelLayout.DefaultWidth);
+        Assert.Equal(120, PanelLayout.DefaultWidth);
         var left = PanelLayout.LeftInteriorWidthForTotal(PanelLayout.DefaultWidth);
         Assert.Equal((PanelLayout.DefaultWidth - 3) / 3, left);
         var right = PanelLayout.DefaultWidth - left - 3;

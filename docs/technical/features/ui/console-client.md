@@ -24,30 +24,30 @@
 ## Screen redraw
 
 - Each full report uses `Console.Clear()` then writes a fresh composed frame. Cursor-home / fixed-viewport scrolling is **not** used yet; if the frame is taller than the window, the terminal buffer handles scrolling.
-- Frame width defaults to **100** columns. At the session boundary, when `Console.WindowWidth` is available and ≥ 40, clamp to `min(WindowWidth, 100)`. Formatter APIs take an explicit `width` for tests.
+- Frame width defaults to **120** columns. At the session boundary, when `Console.WindowWidth` is available and ≥ 40, clamp to `min(WindowWidth, 120)`. Formatter APIs take an explicit `width` for tests.
 
 ## Panel layout
 
 The screen is three logical regions composed with classic single- and double-line box-drawing characters. The bottom split is **left:right = 1:2** (left interior is one-third of `totalWidth - 3`).
 
 ```text
-╔══════════════════════════════════════════════════════════════════════════════════════════════════╗
-║ Marloth Strategy                                                                                 ║
-║ Tick N                                                                                           ║
-║ actors: …                                                                                        ║
-╠═════════════════════════════════╤════════════════════════════════════════════════════════════════╣
-║ node-id:                        │  (flow graph)                                                  ║
-║   port: …                       │                                                                ║
-╟─────────────────────────────────┤                                                                ║
-║ other-node:                     │                                                                ║
-║   …                             │                                                                ║
-╚═════════════════════════════════╧════════════════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗
+║ Marloth Strategy                                                                                                     ║
+║ Tick N                                                                                                               ║
+║ actors: …                                                                                                            ║
+╠══════════════════════════════════════╤═══════════════════════════════════════════════════════════════════════════════╣
+║ node-id:            │ actor weight   │  (flow graph)                                                                 ║
+║   port: …           │                │                                                                               ║
+╟─────────────────────┴────────────────┤                                                                               ║
+║ other-node:         │ …              │                                                                               ║
+║   …                 │                │                                                                               ║
+╚══════════════════════════════════════╧═══════════════════════════════════════════════════════════════════════════════╝
 ```
 
 | Region | Border | Content |
 |--------|--------|---------|
 | Top status | Double outer | Title, `Tick N`, `actors:` line |
-| Left state | Double outer shared with right; node **subpanels** stacked with single-line horizontal dividers (`╟`/`╢` against double verticals) | One subpanel per graph node (id order): same port / timer / progress leaves as before |
+| Left state | Double outer shared with right; node **subpanels** stacked with single-line horizontal dividers (`╟`/`╢` against double verticals) | One subpanel per graph node (id order). Each subpanel is **split horizontally**: left = port / timer / progress leaves; right = preferred assignments as `actorId weight` (ordinal by actor id; blank when none) |
 | Right flow | Double outer; interior uses single-line node boxes | MSAGL Sugiyama + rectilinear routing with `RelativeFloatingPort` anchors (inputs on top, outputs on bottom, spaced per port); ASCII rasterizes those polylines |
 
 Helpers: `BoxDrawing` (character constants), `AsciiCanvas` (char buffer), `PanelLayout` (compose top + split bottom; `LeftInteriorWidthForTotal`), `FlowGraphLayout` (MSAGL layout + floating ports), `FlowGraphWires` (orthogonal connector glyphs), `FlowGraphPrinter` (quantize MSAGL geometry onto a character grid).
@@ -59,8 +59,8 @@ Leaf formatting inside left subpanels (and header actors) follows:
 | Rule | Detail |
 |------|--------|
 | Title / tick | Header lines: `Marloth Strategy`, then `Tick {N}` |
-| Actors | One `actors:` line: comma-separated actor ids when present; `0` when the roster is empty. With a previous state, annotate roster changes with `previous → current` (e.g. `intern → 0` after a mass quit) |
-| Nodes | One left subpanel per graph node, ordered by node id |
+| Actors | One `actors:` line: comma-separated actor ids (ordinal) when present; `0` when the roster is empty. With a previous state, annotate roster changes with `previous → current` (e.g. `boss, intern → 0` after a mass quit) |
+| Nodes | One left subpanel per graph node, ordered by node id. Each subpanel splits horizontally: state leaves on the left; preferred assignments on the right (`actorId weight`, ordinal by actor id) |
 | Ports | Union of the node type’s input and output ports (ordinal by port id). Same-named input/output ports share one committed `PortSignals` stock and one display entry |
 | Money (resource) | Committed stock on the port with change arrows from the prior tick (`previous → current` when different). Tick 0 shows committed stock only. Missing stock displays as `0`; numerics **rounded** to nearest integer |
 | Enchantment (information) | Nested `hash` (abbreviated, 7 hex chars) plus `volume` / `darkness` / `fallacy` aggregate counts when present; absent displays as `0`; counts rounded for display; change arrows from prior committed stock |
