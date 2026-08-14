@@ -10,9 +10,11 @@
 - Wiring Client to Simulation tick/report APIs
 - Adding IDE play launch configuration for the console App
 - Changing box-drawing / panel layout helpers
+- Adding or changing optional play-only dotenv / `.env` overrides on the App host
 
 ## Host and session
 
+- Before constructing `GameConfig`, App loads an optional repo `.env` via DotNetEnv (`NoClobber` + `TraversePath`). Missing file is a no-op; unset keys must keep **production** play behavior. Shell-set env vars win over file values. Play-only developer tweaks — not used by tests (App is not on the test graph). See [`.env.example`](../../../../.env.example).
 - App constructs `GameConfig` and calls `ConsoleClient.Run(config)`.
 - Prefer a **single abort boundary** at process entry for fatal/unrecoverable errors ([error handling](../platform/error-handling.md)); do not scatter catches in Client.
 - Client seeds with `MagicAgencySeed.CreateInitialState()`, clears the screen, prints the tick-0 panel screen, then loops until quit/EOF ([console loop](../../../game/features/session/console-loop.md)).
