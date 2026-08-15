@@ -30,7 +30,8 @@ public static class NodeTypeConfigLoader
                 dto.Effort,
                 dto.VolumeDelta,
                 dto.DarknessDelta,
-                dto.FallacyConstant));
+                dto.FallacyConstant,
+                dto.DesignDarknessDelta));
 
         var testing = ReadRequired<TestingNodeConfigDto, TestingNodeConfig>(
             Path.Combine(directory, "testing.json"),
@@ -54,7 +55,7 @@ public static class NodeTypeConfigLoader
 
         var design = ReadRequired<DesignNodeConfigDto, DesignNodeConfig>(
             Path.Combine(directory, "design.json"),
-            dto => new DesignNodeConfig(dto.Effort));
+            dto => new DesignNodeConfig(dto.Effort, dto.DesignDelta, dto.DarknessReduction));
 
         return new NodeTypeConfigs(enchant, testing, sell, treasury, payroll, merge, design);
     }
@@ -99,6 +100,9 @@ public static class NodeTypeConfigLoader
 
         [JsonRequired]
         public double FallacyConstant { get; init; }
+
+        [JsonRequired]
+        public double DesignDarknessDelta { get; init; }
     }
 
     private sealed class TestingNodeConfigDto
@@ -147,5 +151,11 @@ public static class NodeTypeConfigLoader
     {
         [JsonRequired]
         public double Effort { get; init; }
+
+        [JsonRequired]
+        public double DesignDelta { get; init; }
+
+        [JsonRequired]
+        public double DarknessReduction { get; init; }
     }
 }

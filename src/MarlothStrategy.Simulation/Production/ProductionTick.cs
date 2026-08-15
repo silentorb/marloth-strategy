@@ -199,15 +199,11 @@ public static class ProductionTick
 
         if (node.Type == MagicAgencySeed.EnchantTypeId ||
             node.Type == MagicAgencySeed.TestingTypeId ||
+            node.Type == MagicAgencySeed.DesignTypeId ||
             node.Type == MagicAgencySeed.SellTypeId)
         {
             var key = new PortKey(nodeId, MagicAgencySeed.EnchantmentPortId);
             return resolvedInputs.TryGetValue(key, out var value) && value is SignalValue.Enchantment;
-        }
-
-        if (node.Type == MagicAgencySeed.DesignTypeId)
-        {
-            return true;
         }
 
         if (node.Type == MagicAgencySeed.MergeTypeId)
@@ -343,7 +339,9 @@ public static class ProductionTick
                     effort,
                     progress,
                     resolvedInputs,
-                    outputs);
+                    residuals,
+                    outputs,
+                    scratch);
                 rowByNode[nodeId] = applied.Row;
                 nextProgress[nodeId] = applied.Progress;
                 nextCycles[nodeId] = priorCycles + applied.Applications;
@@ -495,24 +493,17 @@ public static class ProductionTick
         BlockScratch scratch)
     {
         var enchantmentPort = MagicAgencySeed.EnchantmentPortId;
-        var designsPort = MagicAgencySeed.DesignsPortId;
 
         if (!nodeType.Inputs.ContainsKey(enchantmentPort) ||
-            !nodeType.Outputs.ContainsKey(enchantmentPort) ||
-            !nodeType.Inputs.ContainsKey(designsPort))
+            !nodeType.Outputs.ContainsKey(enchantmentPort))
         {
             throw new InvalidOperationException(
                 $"Node type '{nodeType.Id}' does not match enchant port layout.");
         }
 
         resolvedInputs.TryGetValue(new PortKey(nodeId, enchantmentPort), out var available);
-        resolvedInputs.TryGetValue(new PortKey(nodeId, designsPort), out var designsAvailable);
         var enchantmentKey = new PortKey(nodeId, enchantmentPort);
-        var designsKey = new PortKey(nodeId, designsPort);
         var outputKey = new PortKey(nodeId, enchantmentPort);
-        var designsCount = designsAvailable is SignalValue.Designs designs && designs.Amount > 0
-            ? designs.Amount
-            : 0;
 
         if (assignmentEffort <= 0m || available is not SignalValue.Enchantment starting)
         {
@@ -520,8 +511,6 @@ public static class ProductionTick
             {
                 residuals[enchantmentKey] = available;
             }
-
-            ResidualDesigns(residuals, designsKey, designsAvailable, designsCount);
 
             return new AppliedDraft(
                 new NodeIoRow(
@@ -548,11 +537,10 @@ public static class ProductionTick
             ActorStatKeys.DefaultEnchanting);
 
         var currentBlock = starting.Block;
-        var mutated = false;
         var applications = 0;
         while (true)
         {
-            var required = config.Effort + currentBlock.DarknessCount;
+            var required = config.Effort + currentBlock.Darkness;
             if (required <= 0 || nextProgress < required)
             {
                 break;
@@ -560,21 +548,13 @@ public static class ProductionTick
 
             nextProgress -= required;
             applications++;
-            var designsForThis = mutated ? 0 : designsCount;
             var (nextBlock, nextUnitId) = EnchantmentOps.Mutate(
                 currentBlock,
                 config,
-                scratch.NextUnitId,
-                designsForThis);
+                scratch.NextUnitId);
             scratch.NextUnitId = nextUnitId;
             scratch.Register(nextBlock);
             currentBlock = nextBlock;
-            mutated = true;
-        }
-
-        if (!mutated)
-        {
-            ResidualDesigns(residuals, designsKey, designsAvailable, designsCount);
         }
 
         var current = new SignalValue.Enchantment(currentBlock);
@@ -596,18 +576,6 @@ public static class ProductionTick
             applications);
     }
 
-    private static void ResidualDesigns(
-        ImmutableDictionary<PortKey, SignalValue>.Builder residuals,
-        PortKey designsKey,
-        SignalValue? designsAvailable,
-        int designsCount)
-    {
-        if (designsCount > 0 && designsAvailable is not null)
-        {
-            residuals[designsKey] = designsAvailable;
-        }
-    }
-
     private static AppliedDraft ApplyDesign(
         GameState state,
         NodeId nodeId,
@@ -616,33 +584,46 @@ public static class ProductionTick
         decimal assignmentEffort,
         double progress,
         ImmutableDictionary<PortKey, SignalValue> resolvedInputs,
-        ImmutableDictionary<PortKey, SignalValue>.Builder outputs)
+        ImmutableDictionary<PortKey, SignalValue>.Builder residuals,
+        ImmutableDictionary<PortKey, SignalValue>.Builder outputs,
+        BlockScratch scratch)
     {
-        var designsPort = MagicAgencySeed.DesignsPortId;
+        var enchantmentPort = MagicAgencySeed.EnchantmentPortId;
 
-        if (nodeType.Inputs.Count != 0 || !nodeType.Outputs.ContainsKey(designsPort))
+        if (!nodeType.Inputs.ContainsKey(enchantmentPort) ||
+            !nodeType.Outputs.ContainsKey(enchantmentPort))
         {
             throw new InvalidOperationException(
                 $"Node type '{nodeType.Id}' does not match design port layout.");
         }
 
-        var outputKey = new PortKey(nodeId, designsPort);
-        if (assignmentEffort <= 0m)
+        resolvedInputs.TryGetValue(new PortKey(nodeId, enchantmentPort), out var available);
+        var enchantmentKey = new PortKey(nodeId, enchantmentPort);
+        var outputKey = new PortKey(nodeId, enchantmentPort);
+
+        if (assignmentEffort <= 0m || available is not SignalValue.Enchantment starting)
         {
+            if (available is not null)
+            {
+                residuals[enchantmentKey] = available;
+            }
+
             return new AppliedDraft(
                 new NodeIoRow(
                     nodeId,
                     assignmentEffort,
-                    designsPort,
-                    SignalTypes.Designs,
-                    Available: null,
+                    enchantmentPort,
+                    SignalTypes.Enchantment,
+                    available,
                     Consumed: false,
-                    Residual: null,
-                    designsPort,
-                    SignalTypes.Designs,
+                    available,
+                    enchantmentPort,
+                    SignalTypes.Enchantment,
                     Produced: null),
                 progress);
         }
+
+        scratch.Register(starting.Block);
 
         var nextProgress = progress + ProgressGain(
             state,
@@ -651,34 +632,47 @@ public static class ProductionTick
             ActorStatKeys.Designing,
             ActorStatKeys.DefaultDesigning);
 
-        var granted = 0;
+        var applications = 0;
         while (config.Effort > 0 && nextProgress >= config.Effort)
         {
             nextProgress -= config.Effort;
-            granted++;
+            applications++;
         }
 
-        SignalValue.Designs? produced = null;
-        if (granted > 0)
+        EnchantmentBlock currentBlock;
+        if (applications > 0)
         {
-            produced = new SignalValue.Designs(granted);
-            outputs[outputKey] = produced;
+            var (designed, nextUnitId) = EnchantmentOps.ApplyDesign(
+                starting.Block,
+                config,
+                scratch.NextUnitId,
+                applications);
+            scratch.NextUnitId = nextUnitId;
+            scratch.Register(designed);
+            currentBlock = designed;
         }
+        else
+        {
+            currentBlock = starting.Block;
+        }
+
+        var current = new SignalValue.Enchantment(currentBlock);
+        outputs[outputKey] = current;
 
         return new AppliedDraft(
             new NodeIoRow(
                 nodeId,
                 assignmentEffort,
-                designsPort,
-                SignalTypes.Designs,
-                Available: null,
-                Consumed: false,
+                enchantmentPort,
+                SignalTypes.Enchantment,
+                available,
+                Consumed: true,
                 Residual: null,
-                designsPort,
-                SignalTypes.Designs,
-                produced),
+                enchantmentPort,
+                SignalTypes.Enchantment,
+                current),
             nextProgress,
-            granted);
+            applications);
     }
 
     private static AppliedDraft ApplyTesting(
@@ -738,7 +732,7 @@ public static class ProductionTick
             ActorStatKeys.DefaultTesting);
 
         var actorCount = CountEffectiveActorsOnNode(state, nodeId, resolvedInputs);
-        var reductionPerApplication = EnchantmentOps.UnitCount(config.FallacyReduction) * actorCount;
+        var reductionPerApplication = config.FallacyReduction * actorCount;
         var currentBlock = starting.Block;
         var applications = 0;
         while (config.Effort > 0 && nextProgress >= config.Effort)
@@ -746,7 +740,10 @@ public static class ProductionTick
             nextProgress -= config.Effort;
             applications++;
             var reduced = EnchantmentOps.ReduceFallacy(currentBlock, reductionPerApplication);
-            if (!ReferenceEquals(reduced, currentBlock) && reduced.Hash != currentBlock.Hash)
+            if (!ReferenceEquals(reduced, currentBlock)
+                && (reduced.Hash != currentBlock.Hash
+                    || reduced.Fallacy != currentBlock.Fallacy
+                    || reduced.Darkness != currentBlock.Darkness))
             {
                 scratch.Register(reduced);
                 currentBlock = reduced;
@@ -1174,7 +1171,7 @@ public static class ProductionTick
                 continue;
             }
 
-            if (produced is SignalValue.Money { Amount: 0 } or SignalValue.Designs { Amount: 0 })
+            if (produced is SignalValue.Money { Amount: 0 })
             {
                 continue;
             }

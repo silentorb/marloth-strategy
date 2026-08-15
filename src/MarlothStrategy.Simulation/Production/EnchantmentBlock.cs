@@ -14,22 +14,22 @@ public readonly record struct EnchantmentUnitId(ulong Value) : IComparable<Encha
 }
 
 /// <summary>
-/// Content-addressed enchantment block: parent hash plus discrete unit sets for volume, darkness, and fallacy.
+/// Content-addressed enchantment block: parent hash plus discrete unit sets for volume and designs,
+/// with floating-point darkness and fallacy scalars that do not participate in hashing.
 /// </summary>
 public sealed record EnchantmentBlock(
     string Hash,
     string? ParentHash,
     ImmutableArray<EnchantmentUnitId> Volume,
-    ImmutableArray<EnchantmentUnitId> Darkness,
-    ImmutableArray<EnchantmentUnitId> Fallacy)
+    ImmutableArray<EnchantmentUnitId> Designs,
+    double Darkness,
+    double Fallacy)
 {
     public const int AbbreviatedHashLength = 7;
 
     public int VolumeCount => Volume.Length;
 
-    public int DarknessCount => Darkness.Length;
-
-    public int FallacyCount => Fallacy.Length;
+    public int DesignsCount => Designs.Length;
 
     public string AbbreviatedHash =>
         Hash.Length <= AbbreviatedHashLength ? Hash : Hash[..AbbreviatedHashLength];
@@ -38,34 +38,46 @@ public sealed record EnchantmentBlock(
         Create(
             parentHash: null,
             volume: ImmutableArray<EnchantmentUnitId>.Empty,
-            darkness: ImmutableArray<EnchantmentUnitId>.Empty,
-            fallacy: ImmutableArray<EnchantmentUnitId>.Empty);
+            designs: ImmutableArray<EnchantmentUnitId>.Empty,
+            darkness: 0,
+            fallacy: 0);
 
     public static EnchantmentBlock Create(
         string? parentHash,
         ImmutableArray<EnchantmentUnitId> volume,
-        ImmutableArray<EnchantmentUnitId> darkness,
-        ImmutableArray<EnchantmentUnitId> fallacy)
+        ImmutableArray<EnchantmentUnitId> designs,
+        double darkness,
+        double fallacy)
     {
+        if (darkness < 0 || fallacy < 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                darkness < 0 ? nameof(darkness) : nameof(fallacy),
+                "Darkness and fallacy must be non-negative.");
+        }
+
         var orderedVolume = OrderUnique(volume);
-        var orderedDarkness = OrderUnique(darkness);
-        var orderedFallacy = OrderUnique(fallacy);
-        var hash = ComputeHash(parentHash, orderedVolume, orderedDarkness, orderedFallacy);
-        return new EnchantmentBlock(hash, parentHash, orderedVolume, orderedDarkness, orderedFallacy);
+        var orderedDesigns = OrderUnique(designs);
+        var hash = ComputeHash(parentHash, orderedVolume, orderedDesigns);
+        return new EnchantmentBlock(
+            hash,
+            parentHash,
+            orderedVolume,
+            orderedDesigns,
+            darkness,
+            fallacy);
     }
 
     public static string ComputeHash(
         string? parentHash,
         ImmutableArray<EnchantmentUnitId> volume,
-        ImmutableArray<EnchantmentUnitId> darkness,
-        ImmutableArray<EnchantmentUnitId> fallacy)
+        ImmutableArray<EnchantmentUnitId> designs)
     {
         var sb = new StringBuilder();
         sb.Append(parentHash ?? "");
         sb.Append('\n');
         AppendUnits(sb, "volume", volume);
-        AppendUnits(sb, "darkness", darkness);
-        AppendUnits(sb, "fallacy", fallacy);
+        AppendUnits(sb, "designs", designs);
         var bytes = Encoding.UTF8.GetBytes(sb.ToString());
         var hash = SHA256.HashData(bytes);
         return Convert.ToHexString(hash).ToLowerInvariant();
@@ -106,56 +118,133 @@ public sealed record EnchantmentBlock(
     }
 }
 
-/// <summary>Pure helpers for mutate, testing reduction, ancestry, and commutative combine.</summary>
+/// <summary>Pure helpers for mutate, design growth, testing reduction, ancestry, and commutative combine.</summary>
 public static class EnchantmentOps
 {
     public static int UnitCount(double configValue) =>
         checked((int)Math.Round(configValue, MidpointRounding.AwayFromZero));
 
+    public static double ClampNonNegative(double value) => value < 0 ? 0 : value;
+
     public static (EnchantmentBlock Block, ulong NextUnitId) Mutate(
         EnchantmentBlock parent,
         EnchantNodeConfig config,
-        ulong nextUnitId,
-        int designs = 0)
+        ulong nextUnitId)
     {
         ArgumentNullException.ThrowIfNull(parent);
         ArgumentNullException.ThrowIfNull(config);
-        if (designs < 0)
-        {
-            throw new InvalidOperationException("Designs count must be non-negative.");
-        }
 
         var volumeDelta = UnitCount(config.VolumeDelta);
-        var darknessDelta = UnitCount(config.DarknessDelta);
-        var darknessAdd = Math.Max(0, (2 * darknessDelta) - designs);
-        var fallacyAdd = parent.DarknessCount + UnitCount(config.FallacyConstant);
-        if (volumeDelta < 0 || darknessDelta < 0 || fallacyAdd < 0)
+        if (volumeDelta < 0)
         {
-            throw new InvalidOperationException("Enchantment unit deltas must be non-negative.");
+            throw new InvalidOperationException("Enchantment volume delta must be non-negative.");
         }
 
+        if (config.DarknessDelta < 0
+            || config.FallacyConstant < 0
+            || config.DesignDarknessDelta < 0)
+        {
+            throw new InvalidOperationException(
+                "Enchantment darkness and fallacy parameters must be non-negative.");
+        }
+
+        var volumeInParent = ToSet(parent.Volume);
+        var unusedDesigns = parent.Designs
+            .Where(id => !volumeInParent.Contains(id))
+            .OrderBy(id => id.Value)
+            .ToArray();
+
         var next = nextUnitId;
-        var volume = parent.Volume.AddRange(Allocate(ref next, volumeDelta));
-        var darkness = parent.Darkness.AddRange(Allocate(ref next, darknessAdd));
-        var fallacy = parent.Fallacy.AddRange(Allocate(ref next, fallacyAdd));
-        var block = EnchantmentBlock.Create(parent.Hash, volume, darkness, fallacy);
+        var volumeBuilder = parent.Volume.ToBuilder();
+        var darknessAdd = 0.0;
+        var remaining = volumeDelta;
+        var designIndex = 0;
+
+        while (remaining > 0 && designIndex < unusedDesigns.Length)
+        {
+            volumeBuilder.Add(unusedDesigns[designIndex]);
+            darknessAdd += config.DesignDarknessDelta;
+            designIndex++;
+            remaining--;
+        }
+
+        if (remaining > 0)
+        {
+            volumeBuilder.AddRange(Allocate(ref next, remaining));
+            darknessAdd += config.DarknessDelta * remaining;
+        }
+
+        var darkness = ClampNonNegative(parent.Darkness + darknessAdd);
+        var fallacy = ClampNonNegative(
+            parent.Fallacy + parent.Darkness + config.FallacyConstant);
+        var block = EnchantmentBlock.Create(
+            parent.Hash,
+            volumeBuilder.ToImmutable(),
+            parent.Designs,
+            darkness,
+            fallacy);
         return (block, next);
     }
 
-    public static EnchantmentBlock ReduceFallacy(EnchantmentBlock parent, int removeCount)
+    public static (EnchantmentBlock Block, ulong NextUnitId) ApplyDesign(
+        EnchantmentBlock parent,
+        DesignNodeConfig config,
+        ulong nextUnitId,
+        int applications)
     {
         ArgumentNullException.ThrowIfNull(parent);
-        if (removeCount <= 0)
+        ArgumentNullException.ThrowIfNull(config);
+        if (applications < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(applications));
+        }
+
+        if (applications == 0)
+        {
+            return (parent, nextUnitId);
+        }
+
+        var designDelta = UnitCount(config.DesignDelta);
+        if (designDelta < 0 || config.DarknessReduction < 0)
+        {
+            throw new InvalidOperationException(
+                "Design delta and darkness reduction must be non-negative.");
+        }
+
+        var unitsToAdd = checked(designDelta * applications);
+        var next = nextUnitId;
+        var designs = parent.Designs.AddRange(Allocate(ref next, unitsToAdd));
+        var darkness = ClampNonNegative(
+            parent.Darkness - (config.DarknessReduction * applications));
+        var block = EnchantmentBlock.Create(
+            parent.Hash,
+            parent.Volume,
+            designs,
+            darkness,
+            parent.Fallacy);
+        return (block, next);
+    }
+
+    public static EnchantmentBlock ReduceFallacy(EnchantmentBlock parent, double removeAmount)
+    {
+        ArgumentNullException.ThrowIfNull(parent);
+        if (removeAmount <= 0)
         {
             return parent;
         }
 
-        // Ascending order: remove lowest ids first.
-        var fallacy = parent.FallacyCount <= removeCount
-            ? ImmutableArray<EnchantmentUnitId>.Empty
-            : parent.Fallacy.RemoveRange(0, removeCount);
+        var fallacy = ClampNonNegative(parent.Fallacy - removeAmount);
+        if (fallacy == parent.Fallacy)
+        {
+            return parent;
+        }
 
-        return EnchantmentBlock.Create(parent.Hash, parent.Volume, parent.Darkness, fallacy);
+        return EnchantmentBlock.Create(
+            parent.Hash,
+            parent.Volume,
+            parent.Designs,
+            parent.Darkness,
+            fallacy);
     }
 
     public static bool IsAncestor(
@@ -325,8 +414,9 @@ public static class EnchantmentOps
         return EnchantmentBlock.Create(
             parentHash,
             MergeUnits(ancestor.Volume, unique.Select(b => b.Volume).ToArray()),
-            MergeUnits(ancestor.Darkness, unique.Select(b => b.Darkness).ToArray()),
-            MergeUnits(ancestor.Fallacy, unique.Select(b => b.Fallacy).ToArray()));
+            MergeUnits(ancestor.Designs, unique.Select(b => b.Designs).ToArray()),
+            MergeScalar(ancestor.Darkness, unique.Select(b => b.Darkness).ToArray()),
+            MergeScalar(ancestor.Fallacy, unique.Select(b => b.Fallacy).ToArray()));
     }
 
     public static EnchantmentBlock ThreeWayMerge(
@@ -344,8 +434,9 @@ public static class EnchantmentOps
         return EnchantmentBlock.Create(
             parentHash,
             MergeUnits(ancestor.Volume, left.Volume, right.Volume),
-            MergeUnits(ancestor.Darkness, left.Darkness, right.Darkness),
-            MergeUnits(ancestor.Fallacy, left.Fallacy, right.Fallacy));
+            MergeUnits(ancestor.Designs, left.Designs, right.Designs),
+            MergeScalar(ancestor.Darkness, left.Darkness, right.Darkness),
+            MergeScalar(ancestor.Fallacy, left.Fallacy, right.Fallacy));
     }
 
     /// <summary>
@@ -407,27 +498,54 @@ public static class EnchantmentOps
     }
 
     /// <summary>
+    /// Scalar merge: ancestor + sum of each branch's delta from ancestor, clamped at zero.
+    /// </summary>
+    public static double MergeScalar(double ancestor, params double[] sides) =>
+        MergeScalar(ancestor, (IReadOnlyList<double>)sides);
+
+    public static double MergeScalar(double ancestor, IReadOnlyList<double> sides)
+    {
+        ArgumentNullException.ThrowIfNull(sides);
+        var total = ancestor;
+        foreach (var side in sides)
+        {
+            total += side - ancestor;
+        }
+
+        return ClampNonNegative(total);
+    }
+
+    /// <summary>
     /// Builds a block with sequential unit ids for tests / seeding synthetic stocks.
     /// Does not set a meaningful parent chain beyond an optional parent hash.
     /// </summary>
     public static (EnchantmentBlock Block, ulong NextUnitId) FromCounts(
         int volume,
-        int darkness,
-        int fallacy,
+        int designs,
+        double darkness,
+        double fallacy,
         ulong nextUnitId = 1,
         string? parentHash = null)
     {
-        if (volume < 0 || darkness < 0 || fallacy < 0)
+        if (volume < 0 || designs < 0)
         {
             throw new ArgumentOutOfRangeException(nameof(volume), "Unit counts must be non-negative.");
+        }
+
+        if (darkness < 0 || fallacy < 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                darkness < 0 ? nameof(darkness) : nameof(fallacy),
+                "Darkness and fallacy must be non-negative.");
         }
 
         var next = nextUnitId;
         var block = EnchantmentBlock.Create(
             parentHash,
             Allocate(ref next, volume),
-            Allocate(ref next, darkness),
-            Allocate(ref next, fallacy));
+            Allocate(ref next, designs),
+            darkness,
+            fallacy);
         return (block, next);
     }
 

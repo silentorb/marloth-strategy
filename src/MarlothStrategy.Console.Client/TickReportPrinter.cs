@@ -74,9 +74,8 @@ public static class TickReportPrinter
     {
         null => "0",
         SignalValue.Money m => FormatRounded(m.Amount),
-        SignalValue.Designs d => FormatRounded(d.Amount),
         SignalValue.Enchantment e =>
-            $"{e.Block.AbbreviatedHash} {FormatRounded(e.Volume)}/{FormatRounded(e.Darkness)}/{FormatRounded(e.Fallacy)}",
+            $"{e.Block.AbbreviatedHash} {FormatRounded(e.Volume)}/{FormatRounded(e.Designs)}/{FormatScalar(e.Darkness)}/{FormatScalar(e.Fallacy)}",
         _ => throw new InvalidOperationException($"Unknown signal value kind: {value.GetType().Name}."),
     };
 
@@ -321,19 +320,25 @@ public static class TickReportPrinter
                 "volume",
                 FormatRounded(priorInfo.Volume),
                 "0",
-                FormatNumericDelta(baseline, baseInfo?.Volume ?? 0, 0));
+                FormatCountDelta(baseline, baseInfo?.Volume ?? 0, 0));
+            AppendEnchantmentLeaf(
+                rows,
+                "designs",
+                FormatRounded(priorInfo.Designs),
+                "0",
+                FormatCountDelta(baseline, baseInfo?.Designs ?? 0, 0));
             AppendEnchantmentLeaf(
                 rows,
                 "darkness",
-                FormatRounded(priorInfo.Darkness),
+                FormatScalar(priorInfo.Darkness),
                 "0",
-                FormatNumericDelta(baseline, baseInfo?.Darkness ?? 0, 0));
+                FormatScalarDelta(baseline, baseInfo?.Darkness ?? 0, 0));
             AppendEnchantmentLeaf(
                 rows,
                 "fallacy",
-                FormatRounded(priorInfo.Fallacy),
+                FormatScalar(priorInfo.Fallacy),
                 "0",
-                FormatNumericDelta(baseline, baseInfo?.Fallacy ?? 0, 0));
+                FormatScalarDelta(baseline, baseInfo?.Fallacy ?? 0, 0));
             return;
         }
 
@@ -344,20 +349,24 @@ public static class TickReportPrinter
             rows.Add(new($"    hash: {currentInfo!.Block.AbbreviatedHash}", string.Empty));
             rows.Add(new(
                 $"    volume: {FormatRounded(currentInfo.Volume)}",
-                FormatNumericDelta(baseline, baseInfo?.Volume ?? 0, currentInfo.Volume)));
+                FormatCountDelta(baseline, baseInfo?.Volume ?? 0, currentInfo.Volume)));
             rows.Add(new(
-                $"    darkness: {FormatRounded(currentInfo.Darkness)}",
-                FormatNumericDelta(baseline, baseInfo?.Darkness ?? 0, currentInfo.Darkness)));
+                $"    designs: {FormatRounded(currentInfo.Designs)}",
+                FormatCountDelta(baseline, baseInfo?.Designs ?? 0, currentInfo.Designs)));
             rows.Add(new(
-                $"    fallacy: {FormatRounded(currentInfo.Fallacy)}",
-                FormatNumericDelta(baseline, baseInfo?.Fallacy ?? 0, currentInfo.Fallacy)));
+                $"    darkness: {FormatScalar(currentInfo.Darkness)}",
+                FormatScalarDelta(baseline, baseInfo?.Darkness ?? 0, currentInfo.Darkness)));
+            rows.Add(new(
+                $"    fallacy: {FormatScalar(currentInfo.Fallacy)}",
+                FormatScalarDelta(baseline, baseInfo?.Fallacy ?? 0, currentInfo.Fallacy)));
             return;
         }
 
         var priorHash = priorInfo is null ? "0" : priorInfo.Block.AbbreviatedHash;
         var priorVolume = priorInfo is null ? "0" : FormatRounded(priorInfo.Volume);
-        var priorDarkness = priorInfo is null ? "0" : FormatRounded(priorInfo.Darkness);
-        var priorFallacy = priorInfo is null ? "0" : FormatRounded(priorInfo.Fallacy);
+        var priorDesigns = priorInfo is null ? "0" : FormatRounded(priorInfo.Designs);
+        var priorDarkness = priorInfo is null ? "0" : FormatScalar(priorInfo.Darkness);
+        var priorFallacy = priorInfo is null ? "0" : FormatScalar(priorInfo.Fallacy);
         AppendEnchantmentLeaf(
             rows,
             "hash",
@@ -369,19 +378,25 @@ public static class TickReportPrinter
             "volume",
             priorVolume,
             FormatRounded(currentInfo.Volume),
-            FormatNumericDelta(baseline, baseInfo?.Volume ?? 0, currentInfo.Volume));
+            FormatCountDelta(baseline, baseInfo?.Volume ?? 0, currentInfo.Volume));
+        AppendEnchantmentLeaf(
+            rows,
+            "designs",
+            priorDesigns,
+            FormatRounded(currentInfo.Designs),
+            FormatCountDelta(baseline, baseInfo?.Designs ?? 0, currentInfo.Designs));
         AppendEnchantmentLeaf(
             rows,
             "darkness",
             priorDarkness,
-            FormatRounded(currentInfo.Darkness),
-            FormatNumericDelta(baseline, baseInfo?.Darkness ?? 0, currentInfo.Darkness));
+            FormatScalar(currentInfo.Darkness),
+            FormatScalarDelta(baseline, baseInfo?.Darkness ?? 0, currentInfo.Darkness));
         AppendEnchantmentLeaf(
             rows,
             "fallacy",
             priorFallacy,
-            FormatRounded(currentInfo.Fallacy),
-            FormatNumericDelta(baseline, baseInfo?.Fallacy ?? 0, currentInfo.Fallacy));
+            FormatScalar(currentInfo.Fallacy),
+            FormatScalarDelta(baseline, baseInfo?.Fallacy ?? 0, currentInfo.Fallacy));
     }
 
     private static void AppendEnchantmentLeaf(
@@ -392,16 +407,32 @@ public static class TickReportPrinter
         string delta) =>
         rows.Add(new($"    {name}: {FormatChange(prior, current)}", delta));
 
-    private static string FormatNumericDelta(GameState? baseline, double baseAmount, double currentAmount) =>
+    private static string FormatCountDelta(GameState? baseline, double baseAmount, double currentAmount) =>
         baseline is null ? string.Empty : FormatSignedDelta(RoundAway(baseAmount), RoundAway(currentAmount));
+
+    private static string FormatScalarDelta(GameState? baseline, double baseAmount, double currentAmount)
+    {
+        if (baseline is null)
+        {
+            return string.Empty;
+        }
+
+        var delta = currentAmount - baseAmount;
+        if (Math.Abs(delta) < 1e-9)
+        {
+            return "0";
+        }
+
+        var text = FormatScalar(Math.Abs(delta));
+        return delta > 0 ? $"+{text}" : $"-{text}";
+    }
 
     private static long RoundedResource(SignalValue? value) => value switch
     {
         null => 0,
         SignalValue.Money m => RoundAway(m.Amount),
-        SignalValue.Designs d => RoundAway(d.Amount),
         _ => throw new InvalidOperationException(
-            $"Expected resource money or designs on port, got {value.GetType().Name}."),
+            $"Expected resource money on port, got {value.GetType().Name}."),
     };
 
     private static string FormatSignedDelta(long baseline, long current)
@@ -421,9 +452,8 @@ public static class TickReportPrinter
     {
         null => "0",
         SignalValue.Money m => FormatRounded(m.Amount),
-        SignalValue.Designs d => FormatRounded(d.Amount),
         _ => throw new InvalidOperationException(
-            $"Expected resource money or designs on port, got {value.GetType().Name}."),
+            $"Expected resource money on port, got {value.GetType().Name}."),
     };
 
     private static string FormatChange(string prior, string current) =>
@@ -431,7 +461,7 @@ public static class TickReportPrinter
 
     private static SignalKind KindOf(SignalTypeId typeId)
     {
-        if (typeId == SignalTypes.Money || typeId == SignalTypes.Designs)
+        if (typeId == SignalTypes.Money)
         {
             return SignalKind.Resource;
         }
@@ -449,6 +479,21 @@ public static class TickReportPrinter
 
     private static string FormatRounded(double value) =>
         RoundAway(value).ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Formats floating-point enchantment scalars with trimmed fractional digits
+    /// so low amounts remain visible (unlike integer rounding).
+    /// </summary>
+    private static string FormatScalar(double value)
+    {
+        if (Math.Abs(value) < 1e-12)
+        {
+            return "0";
+        }
+
+        var rounded = Math.Round(value, 4, MidpointRounding.AwayFromZero);
+        return rounded.ToString("0.####", CultureInfo.InvariantCulture);
+    }
 
     private static string FormatInt(int value) =>
         value.ToString(CultureInfo.InvariantCulture);

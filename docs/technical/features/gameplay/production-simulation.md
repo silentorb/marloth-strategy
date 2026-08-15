@@ -27,13 +27,13 @@ There is no package/NuGet link to Imp; this is a C# model inspired by Imp’s gr
 
 Money amounts (`Money.Amount`), sell payout floor, node **effort** values, actor **stats** / **wage**, and per-node **progress** are floating-point (`double`).
 
-**Designs** counts (`Designs.Amount`) are discrete integers (`int`). Enchantment **volume / darkness / fallacy** are discrete unit counts (`int`). Config deltas (`volumeDelta`, `darknessDelta`, `fallacyConstant`, `fallacyReduction`) load as `double` and are rounded to non-negative integers (`AwayFromZero`) when allocating or removing units. Enchant darkness added per mutation is `max(0, 2 × roundedDarknessDelta − designs)`.
+Enchantment **volume / designs** are discrete unit counts (`int`). Enchantment **darkness / fallacy** are non-negative floating-point scalars (`double`) and **do not** participate in content hashing. Config `volumeDelta` / `designDelta` load as `double` and are rounded to non-negative integers (`AwayFromZero`) when allocating units. Darkness/fallacy config values (`darknessDelta`, `designDarknessDelta`, `fallacyConstant`, `darknessReduction`, `fallacyReduction`) are used as floating-point amounts without integer rounding.
 
 Actor **capacity** and per-node **assignment effort** remain `decimal` ratios. Progress gain converts with `(double)(stat × assignmentEffort)`.
 
 Payroll **period** and elapsed **timers** are integers (`int`).
 
-Console display shows aggregate unit counts and an abbreviated content hash; simulation keeps exact unit sets and full hashes.
+Console display shows volume/design counts, trimmed fractional darkness/fallacy, and an abbreviated content hash; simulation keeps exact unit sets, scalar values, and full hashes.
 
 ## Core types
 
@@ -43,8 +43,8 @@ Identifiers are strings (or thin string wrappers): `NodeId`, `EdgeId`, `NodeType
 |------|------|
 | `Port` / `NodeType` | Catalog: input/output ports + signal types |
 | `Node` / `Edge` / `PortReference` / `NodeGraph` | Instance wiring |
-| `SignalValue` | Typed payloads: resource `Money(double)` / `Designs(int)`, or information `Enchantment(EnchantmentBlock)` |
-| `EnchantmentBlock` | Content-addressed block: `Hash`, `ParentHash`, ordered unique unit-id arrays for volume/darkness/fallacy |
+| `SignalValue` | Typed payloads: resource `Money(double)`, or information `Enchantment(EnchantmentBlock)` |
+| `EnchantmentBlock` | Content-addressed block: `Hash`, `ParentHash`, ordered unique unit-id arrays for volume/designs, plus floating-point `Darkness` / `Fallacy` (excluded from hash) |
 | `Actor` | `Id`, `Capacity` (`decimal`), `Stats` (`string` → `double`), optional `Wage` (`double?`) |
 | `Assignment` | Preferred `ActorId` → `NodeId` with positive relative `Weight` (`decimal`, default `1`) (many nodes per actor) |
 | `PendingMoneyMove` | FIFO treasury queue entry: direction `In` / `Out` + `Amount` |
@@ -58,7 +58,6 @@ Port signals are keyed by `(NodeId, PortId)`. Node progress, node timers, and no
 | Kind | Payload | Route / merge |
 |------|---------|---------------|
 | **Resource (money)** | Scalar quantity (`Money`) | Owned on the holding node. Money routed onto treasury’s money port **enqueues** a pending inbound move (does not `AddResource` into the committed pile). Other money edges **`+`** via `AddResource`. Payroll payday enqueues outbound; treasury applications apply one pending move per effort |
-| **Resource (designs)** | Discrete count (`Designs`) | **`+`** via `AddResource`. Routed onto `enchant.designs` like other non-treasury resources (buffered; no same-tick chain) |
 | **Information** | Single structure (`Enchantment` block) | **Copy** along each outgoing edge. At the destination, residual plus every routed copy **`+`** via `EnchantmentOps.TryCombine`. Mutate only inside node logic |
 
 Residuals are applied first, then all routed copies into a destination combine in one n-ary `+`. Incompatible enchantment histories (any pair with no common ancestor) yield no value: the destination is **empty**, including any residual. Combine is order-independent.
@@ -69,8 +68,7 @@ Preferred assignments live on `GameState.Assignments`. Each tick, **effective** 
 
 | Node type | Prerequisite |
 |-----------|--------------|
-| `enchant` / `testing` / `sell` | Enchantment on process input port (`enchant`’s `designs` input is optional) |
-| `design` | None (always effective when assigned) |
+| `enchant` / `testing` / `design` / `sell` | Enchantment on process input port |
 | `merge` | Enchantments on both `primary` and `secondary` input ports |
 | `treasury` | `PendingMoneyMoves` non-empty |
 | `payroll` | Timer elapsed `>= period` (payday due) |
@@ -87,12 +85,13 @@ Each seed node carries runtime `progress` (`double`, default `0`) and cumulative
 Node configs include:
 
 - **`effort`** (enchant / testing / design / merge / sell / treasury / payroll) — base work units per application
-- enchant also has `volumeDelta`, `darknessDelta`, `fallacyConstant`
+- enchant also has `volumeDelta`, `darknessDelta`, `designDarknessDelta`, `fallacyConstant`
+- design also has `designDelta`, `darknessReduction`
 - testing also has `fallacyReduction`
 - sell also has `payoutFloor`
 - payroll also has `defaultWage` / `period`
 
-**Enchant** required work per mutation = `config.effort + current.darknessCount` (recomputed after each mutate). Other nodes use `config.effort` per application. While progress covers the required amount, applications run and subtract that amount; each application increments that node’s `NodeCycles` by `1`.
+**Enchant** required work per mutation = `config.effort + current.darkness` (recomputed after each mutate). Other nodes use `config.effort` per application. While progress covers the required amount, applications run and subtract that amount; each application increments that node’s `NodeCycles` by `1`.
 
 ## Node behaviors
 
@@ -100,25 +99,26 @@ Tunable numerics live in `config/node-types/{enchant,testing,design,merge,sell,t
 
 ### `enchant`
 
-- Inputs: `enchantment` (required for work) and optional `designs` (resource); output: `enchantment`.
+- Input / output: `enchantment`.
 - Stat: `enchanting` (default `1`).
 - With assignment effort `> 0` and an input enchantment: add progress; run mutate applications from progress only; **consume** input and **emit** either the mutated result or a **pass-through** copy of the input. Fan-out copies the emitted enchantment only.
-- Mutation: append `volumeDelta` volume units, `max(0, 2 × darknessDelta − designs)` darkness units, and `(darknessCount + fallacyConstant)` fallacy units; parent hash = prior block; register in `EnchantmentBlocks`. `designs` is the Designs count consumed on the **first** mutation this tick (entire available stock; later same-tick mutations use `0`). Missing Designs is `0`. If no mutation completes, residual the Designs input.
-- Required work per mutation: `effort + darknessCount` on the enchantment being mutated.
+- Mutation: for each of `volumeDelta` volume units, prefer the oldest design unit not already in volume (designs are never removed); otherwise allocate a new unit id. Add `designDarknessDelta` darkness per design-derived volume unit and `darknessDelta` per newly allocated volume unit; add `(priorDarkness + fallacyConstant)` fallacy; parent hash = prior block; register in `EnchantmentBlocks`.
+- Required work per mutation: `effort + darkness` on the enchantment being mutated.
+- Hash content: parent hash + volume units + designs units (darkness/fallacy excluded).
 
 ### `design`
 
-- Inputs: none; output: `designs`.
-- Config: `effort` (seed `3`).
+- Input / output: `enchantment`.
+- Config: `effort` (seed `3`), `designDelta` (seed `1`), `darknessReduction` (seed `0.9`).
 - Stat: `designing` (default `1`).
-- Prerequisite: none. With assignment effort `> 0`: add progress; while `progress >= effort`, emit one Designs unit per application and subtract `effort`. Under effort: emit nothing.
+- Prerequisite: enchantment on input. With assignment effort `> 0` and an input enchantment: add progress; while `progress >= effort`, append `designDelta` design units and subtract `darknessReduction` darkness (clamped at zero); **consume** and **emit** (grown or pass-through).
 
 ### `testing`
 
 - Input / output: `enchantment` only.
 - Stat: `testing` (default `1`).
-- With assignment effort `> 0` and an input enchantment: add progress; while `progress >= effort`, remove fallacy units and subtract `effort`; **consume** and **emit** (reduced or pass-through).
-- Each application removes `fallacyReduction × effectiveActorCount` units from fallacy by ascending id (seed defaults `effort: 10`, `fallacyReduction: 5`). New block parent = input hash when units are removed.
+- With assignment effort `> 0` and an input enchantment: add progress; while `progress >= effort`, subtract fallacy and subtract `effort`; **consume** and **emit** (reduced or pass-through).
+- Each application subtracts `fallacyReduction × effectiveActorCount` from fallacy (seed defaults `effort: 10`, `fallacyReduction: 5`). New block parent = input hash when fallacy changes.
 
 ### `merge`
 
@@ -126,13 +126,13 @@ Tunable numerics live in `config/node-types/{enchant,testing,design,merge,sell,t
 - Config: `effort` (seed `1`).
 - Stat: `merging` (default `1`).
 - Prerequisite: both inputs present. With assignment effort and progress ≥ effort: consume both; emit `TryCombine` result (or nothing if incompatible).
-- Resolution (same as port-level `+`): same hash → that block; ancestor/descendant → newer tip; any pair with no common ancestor → no value; else n-way merge per property (omit ancestor units missing from any side; otherwise union), new block parent = lexicographically smaller incomparable-tip hash.
+- Resolution (same as port-level `+`): same hash → that block; ancestor/descendant → newer tip; any pair with no common ancestor → no value; else n-way merge for volume/designs (omit ancestor units missing from any side; otherwise union) and scalar delta-merge for darkness/fallacy (`ancestor + Σ(branch − ancestor)`, clamped at zero); new block parent = lexicographically smaller incomparable-tip hash.
 
 ### `sell`
 
 - Input: `enchantment`; output: `money`.
 - Stat: `sales` (default `1`).
-- Add progress from assignment; when `progress >= effort`, consume enchantment and **emit** `max(payoutFloor, volumeCount - fallacyCount)` on the money output. Otherwise leave enchantment residual and emit no money.
+- Add progress from assignment; when `progress >= effort`, consume enchantment and **emit** `max(payoutFloor, volumeCount - fallacy)` on the money output. Otherwise leave enchantment residual and emit no money.
 - Edge `sell.money` → `treasury.money` enqueues pending inbound (does not immediately grow the committed pile).
 
 ### `treasury`
@@ -165,14 +165,14 @@ ProductionTickResult AdvanceTickWithReport(GameState state);
 // AdvanceTick(state) => AdvanceTickWithReport(state).State;
 ```
 
-`ProductionTickResult` carries the next `GameState` plus `ImmutableArray<NodeIoRow> Nodes` (one row per process-reporting node as implemented, same order as tick iteration). Each `NodeIoRow` reports the **primary** process ports (enchantment in/out for `enchant` / `testing`; designs out for `design`; primary in / enchantment out for `merge`; enchantment in / money out for `sell`) with typed `SignalValue` available / residual / produced fields and whether the primary input was consumed.
+`ProductionTickResult` carries the next `GameState` plus `ImmutableArray<NodeIoRow> Nodes` (one row per process-reporting node as implemented, same order as tick iteration). Each `NodeIoRow` reports the **primary** process ports (enchantment in/out for `enchant` / `testing` / `design`; primary in / enchantment out for `merge`; enchantment in / money out for `sell`) with typed `SignalValue` available / residual / produced fields and whether the primary input was consumed.
 
 Pipeline (each step returns new data; no mutation of prior state):
 
 1. **`ResolveInputs`** — For each node input port, take the value already committed on that port.
 2. **`ResolveEffectiveAssignments` / assignment effort** — Filter preferred assignments by prerequisites; split each actor’s capacity by relative weights over effective rows.
 3. **`ComputeOutputs`** — Node-type-specific behavior using each node’s port inputs, assignment effort, stats, progress, and start-of-tick pending moves. Nodes are independent (no same-tick money chain). Node iteration order must not change results. May enqueue payroll outbound onto a next-pending builder (when a treasury→payroll money funding edge exists); treasury only drains the start-of-tick queue into residuals / actor updates and may emit money on successful outs.
-4. **`CommitSignals`** — Residuals; route outputs (group by destination; residual + routed copies **`+`** — money/designs `AddResource`, enchantment `TryCombine`; incompatible enchantment histories omit the dest key; money to treasury **enqueues inbound** on the pending builder, including treasury→payroll wage delivery). Register any new combined enchantment block.
+4. **`CommitSignals`** — Residuals; route outputs (group by destination; residual + routed copies **`+`** — money `AddResource`, enchantment `TryCombine`; incompatible enchantment histories omit the dest key; money to treasury **enqueues inbound** on the pending builder, including treasury→payroll wage delivery). Register any new combined enchantment block.
 5. **`AdvancePayrollTimer`** — If payroll elapsed `< period`, increment by 1 (no auto-pay).
 6. **`NextState`** — New signals, updated progress/timers/cycles/pending maps, actors/assignments, `Tick + 1`.
 
@@ -190,10 +190,10 @@ state = AdvanceTick(state); // mutable binding, immutable values
 
 Play bootstrap: `ScenarioBootstrap.CreateInitialState(GameConfig)` (loads node configs, actor definitions, and scenario JSON from `config/` under the app base directory; overloads accept explicit configs/actors/pool). `GameConfig.ScenarioPreset` selects a named file `config/scenarios/{name}.json`; null/whitespace generates a random scenario from `SCENARIO_SEED`. Unknown presets, invalid JSON, missing actors, assignments to absent nodes, or presets that include both testing and design are fail-fast (`InvalidOperationException` with path context).
 
-- Node types: `enchant` (in `enchantment` + optional `designs`, out `enchantment`), `design` (out `designs`), `testing` (in/out `enchantment`), `merge` (in `primary`/`secondary`, out `enchantment`; catalog only — not in seeded graphs), `sell` (in `enchantment`, out `money`), `treasury` (in/out `money`), `payroll` (in `money`). Catalog always includes all seven types.
+- Node types: `enchant` (in/out `enchantment`), `design` (in/out `enchantment`), `testing` (in/out `enchantment`), `merge` (in `primary`/`secondary`, out `enchantment`; catalog only — not in seeded graphs), `sell` (in `enchantment`, out `money`), `treasury` (in/out `money`), `payroll` (in `money`). Catalog always includes all seven types.
 - **Essential graph:** nodes `enchant`, `sell`, `treasury`, `payroll`; edges `enchant.enchantment` → `enchant.enchantment` (self-loop); `enchant.enchantment` → `sell.enchantment`; `sell.money` → `treasury.money` (pending inbound on commit); `treasury.money` → `payroll.money`.
 - **Testing variation:** add node `testing`; keep the enchant self-loop; replace `enchant→sell` with `enchant.enchantment` → `testing.enchantment`; `testing.enchantment` → `sell.enchantment`; `testing.enchantment` → `enchant.enchantment` (fan-in `+` with the self-loop); money edges unchanged.
-- **Design variation:** add node `design`; keep essential enchantment and money edges; add `design.designs` → `enchant.designs`. Mutually exclusive with testing.
+- **Design variation:** add node `design`; replace the enchant self-loop with `enchant.enchantment` → `design.enchantment` → `enchant.enchantment` (design is the sole input into enchant); keep `enchant.enchantment` → `sell.enchantment` and money edges. Mutually exclusive with testing.
 - **Preset `lab01`:** `includeTesting: true`, `includeDesign: false`; actors `intern` and `boss` (stats as configured, wages unset). Preferred assignments (weight `1` each): intern → enchant, testing; boss → payroll, sell, treasury.
 - **Actor pool:** `config/scenarios/actor-pool.json` lists eligible actor ids (not every file under `config/actors/`). Random generation: equal thirds among none / testing / design (never both); 2–4 distinct pool actors; preferred assignments (weight `1`) cover **every** graph node; multi-actor overlap on a node is allowed but sparse (more likely when actors are plentiful relative to nodes). Deterministic for a fixed seed.
 - Initial signals: `enchant.enchantment` = genesis empty block; `treasury.money` = `100`; `EnchantmentBlocks` contains genesis; `NextUnitId` = `1`; progress empty/`0`; cycles empty/`0`; payroll timer = `0`; pending money moves empty; `Tick = 0`.

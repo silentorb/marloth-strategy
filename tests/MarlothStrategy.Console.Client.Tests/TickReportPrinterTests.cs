@@ -13,13 +13,14 @@ public sealed class TickReportPrinterTests
             Effort: 10,
             VolumeDelta: 10,
             DarknessDelta: 1,
-            FallacyConstant: 1),
+            FallacyConstant: 1,
+            DesignDarknessDelta: 0.3),
         new TestingNodeConfig(Effort: 10, FallacyReduction: 5),
         new SellNodeConfig(Effort: 10, PayoutFloor: 0),
         new TreasuryNodeConfig(Effort: 1),
         new PayrollNodeConfig(DefaultWage: 10, Period: 5, Effort: 1),
         new MergeNodeConfig(Effort: 1),
-        new DesignNodeConfig(Effort: 3));
+        new DesignNodeConfig(Effort: 3, DesignDelta: 1, DarknessReduction: 0.9));
 
     private static readonly ImmutableDictionary<ActorId, Actor> DefaultActors =
         ImmutableDictionary<ActorId, Actor>.Empty
@@ -57,10 +58,10 @@ public sealed class TickReportPrinterTests
         Assert.Contains("intern 1", text);
         Assert.Contains("boss 1", text);
         Assert.Contains($"{BoxDrawing.SingleVertical}", text);
-        Assert.Contains("  designs: 0", text);
         Assert.Contains("  enchantment:", text);
         Assert.Contains($"    hash: {genesis.AbbreviatedHash}", text);
         Assert.Contains("    volume: 0", text);
+        Assert.Contains("    designs: 0", text);
         Assert.Contains("    darkness: 0", text);
         Assert.Contains("    fallacy: 0", text);
         Assert.Contains("  cycles: 0", text);
@@ -103,7 +104,7 @@ public sealed class TickReportPrinterTests
     }
 
     [Fact]
-    public void FormatScreen_DesignGraph_ShowsDesignsPortAndProgress()
+    public void FormatScreen_DesignGraph_ShowsDesignEnchantmentPorts()
     {
         var spec = new ScenarioSpec(
             IncludeTesting: false,
@@ -115,7 +116,8 @@ public sealed class TickReportPrinterTests
         var text = TickReportPrinter.FormatScreen(state, width: PanelLayout.DefaultWidth);
 
         Assert.Contains("design:", text);
-        Assert.Contains("  designs: 0", text);
+        Assert.Contains("  enchantment:", text);
+        Assert.Contains("    designs: 0", text);
         Assert.Contains("  cycles: 0", text);
         Assert.DoesNotContain("testing:", text);
     }
@@ -165,7 +167,12 @@ public sealed class TickReportPrinterTests
     public void FormatScreen_WithPrevious_AnnotatesChangedLeaves()
     {
         var previous = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors);
-        var (block, _) = EnchantmentOps.FromCounts(10, 1, 1, nextUnitId: 1);
+        var (block, _) = EnchantmentOps.FromCounts(
+            volume: 10,
+            designs: 0,
+            darkness: 1,
+            fallacy: 1,
+            nextUnitId: 1);
         var current = previous with
         {
             Tick = 1,
@@ -198,6 +205,7 @@ public sealed class TickReportPrinterTests
         Assert.Contains("money: 100 \u2192 80", normalized);
         Assert.Contains("cycles: 0 \u2192 2", normalized);
         Assert.Contains("volume: 0 \u2192 10", text);
+        Assert.Contains("designs: 0", text);
         Assert.Contains("darkness: 0 \u2192 1", text);
         Assert.Contains("fallacy: 0 \u2192 1", text);
         Assert.Contains("cycles: 0 \u2192 1", text);
@@ -247,10 +255,14 @@ public sealed class TickReportPrinterTests
     public void FormatSignal_IncludesAbbreviatedHashAndCounts()
     {
         Assert.Equal("11", TickReportPrinter.FormatSignal(new SignalValue.Money(10.6)));
-        Assert.Equal("3", TickReportPrinter.FormatSignal(new SignalValue.Designs(3)));
-        var (block, _) = EnchantmentOps.FromCounts(11, 2, 4, nextUnitId: 1);
+        var (block, _) = EnchantmentOps.FromCounts(
+            volume: 11,
+            designs: 3,
+            darkness: 2.5,
+            fallacy: 4,
+            nextUnitId: 1);
         Assert.Equal(
-            $"{block.AbbreviatedHash} 11/2/4",
+            $"{block.AbbreviatedHash} 11/3/2.5/4",
             TickReportPrinter.FormatSignal(new SignalValue.Enchantment(block)));
     }
 

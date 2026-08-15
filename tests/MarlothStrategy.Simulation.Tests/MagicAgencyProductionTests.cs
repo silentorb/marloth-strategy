@@ -11,13 +11,14 @@ public sealed class MagicAgencyProductionTests
             Effort: 10,
             VolumeDelta: 10,
             DarknessDelta: 1,
-            FallacyConstant: 1),
+            FallacyConstant: 1,
+            DesignDarknessDelta: 0.3),
         new TestingNodeConfig(Effort: 10, FallacyReduction: 5),
         new SellNodeConfig(Effort: 10, PayoutFloor: 0),
         new TreasuryNodeConfig(Effort: 1),
         new PayrollNodeConfig(DefaultWage: 10, Period: 5, Effort: 1),
         new MergeNodeConfig(Effort: 1),
-        new DesignNodeConfig(Effort: 3));
+        new DesignNodeConfig(Effort: 3, DesignDelta: 1, DarknessReduction: 0.9));
 
     private static readonly ImmutableDictionary<ActorId, Actor> DefaultActors =
         ImmutableDictionary<ActorId, Actor>.Empty
@@ -44,12 +45,19 @@ public sealed class MagicAgencyProductionTests
 
     private static SignalValue.Enchantment Enchant(
         int volume,
-        int darkness,
-        int fallacy,
+        double darkness,
+        double fallacy,
+        int designs = 0,
         ulong nextUnitId = 1,
         string? parentHash = null)
     {
-        var (block, _) = EnchantmentOps.FromCounts(volume, darkness, fallacy, nextUnitId, parentHash);
+        var (block, _) = EnchantmentOps.FromCounts(
+            volume,
+            designs,
+            darkness,
+            fallacy,
+            nextUnitId,
+            parentHash);
         return new SignalValue.Enchantment(block);
     }
 
@@ -68,12 +76,18 @@ public sealed class MagicAgencyProductionTests
         };
     }
 
-    private static void AssertCounts(SignalValue? value, int volume, int darkness, int fallacy)
+    private static void AssertCounts(
+        SignalValue? value,
+        int volume,
+        double darkness,
+        double fallacy,
+        int designs = 0)
     {
         var e = Assert.IsType<SignalValue.Enchantment>(value);
         Assert.Equal(volume, e.Volume);
-        Assert.Equal(darkness, e.Darkness);
-        Assert.Equal(fallacy, e.Fallacy);
+        Assert.Equal(designs, e.Designs);
+        Assert.Equal(darkness, e.Darkness, 6);
+        Assert.Equal(fallacy, e.Fallacy, 6);
     }
 
     private static GameState WithMergeGraph(GameState state) =>
@@ -91,16 +105,23 @@ public sealed class MagicAgencyProductionTests
         return ScenarioBootstrap.Materialize(spec, DefaultConfigs, actors);
     }
 
-    private static GameState WithDesignsStock(GameState state, int amount)
+    private static GameState WithDesignInput(
+        GameState state,
+        SignalValue.Enchantment enchantment,
+        ulong? nextUnitId = null)
     {
-        return state with
+        // Isolated design tests should not leave genesis residual on enchant,
+        // or commit would treat design output as incompatible and empty the port.
+        var cleared = state with
         {
-            PortSignals = state.PortSignals.SetItem(
-                new PortKey(MagicAgencySeed.EnchantNodeId, MagicAgencySeed.DesignsPortId),
-                new SignalValue.Designs(amount)),
-            Assignments = ImmutableArray.Create(
-                new Assignment(state.Actors.Keys.First(), MagicAgencySeed.EnchantNodeId)),
+            PortSignals = state.PortSignals.Remove(
+                new PortKey(MagicAgencySeed.EnchantNodeId, MagicAgencySeed.EnchantmentPortId)),
         };
+        return WithEnchantmentStock(
+            cleared,
+            new PortKey(MagicAgencySeed.DesignNodeId, MagicAgencySeed.EnchantmentPortId),
+            enchantment,
+            nextUnitId);
     }
 
     [Fact]
@@ -191,12 +212,12 @@ public sealed class MagicAgencyProductionTests
         AssertCounts(
             Signal(next, MagicAgencySeed.EnchantNodeId, MagicAgencySeed.EnchantmentPortId),
             10,
-            2,
+            10,
             1);
         AssertCounts(
             Signal(next, MagicAgencySeed.TestingNodeId, MagicAgencySeed.EnchantmentPortId),
             10,
-            2,
+            10,
             1);
         Assert.False(
             next.PortSignals.ContainsKey(
@@ -211,7 +232,7 @@ public sealed class MagicAgencyProductionTests
         var enchant = Row(result, MagicAgencySeed.EnchantNodeId);
         Assert.Equal(1.0m, enchant.Effort);
         Assert.True(enchant.Consumed);
-        AssertCounts(enchant.Produced, 10, 2, 1);
+        AssertCounts(enchant.Produced, 10, 10, 1);
     }
 
     [Fact]
@@ -228,12 +249,12 @@ public sealed class MagicAgencyProductionTests
         AssertCounts(
             Signal(next, MagicAgencySeed.EnchantNodeId, MagicAgencySeed.EnchantmentPortId),
             10,
-            2,
+            10,
             1);
         AssertCounts(
             Signal(next, MagicAgencySeed.SellNodeId, MagicAgencySeed.EnchantmentPortId),
             10,
-            2,
+            10,
             1);
     }
 
@@ -257,18 +278,18 @@ public sealed class MagicAgencyProductionTests
         var result = ProductionTick.AdvanceTickWithReport(state);
         var next = result.State;
 
-        // progress 30: cost 10 → (10,2,1); cost 12 → (20,4,4); remainder 8 (third needs 14)
-        AssertCounts(Row(result, MagicAgencySeed.EnchantNodeId).Produced, 20, 4, 4);
+        // progress 30: cost 10 → (10,10,1); cost 20 → (20,20,12); remainder 0
+        AssertCounts(Row(result, MagicAgencySeed.EnchantNodeId).Produced, 20, 20, 12);
         AssertCounts(
             Signal(next, MagicAgencySeed.TestingNodeId, MagicAgencySeed.EnchantmentPortId),
             20,
-            4,
-            4);
-        Assert.Equal(8, next.NodeProgress[MagicAgencySeed.EnchantNodeId]);
+            20,
+            12);
+        Assert.Equal(0, next.NodeProgress[MagicAgencySeed.EnchantNodeId]);
     }
 
     [Fact]
-    public void Design_EmitsOneDesignsPerCompletedApplication()
+    public void Design_AddsDesignUnitsAndReducesDarknessPerApplication()
     {
         var actors = ImmutableDictionary<ActorId, Actor>.Empty.Add(
             MagicAgencySeed.ActorId,
@@ -277,21 +298,25 @@ public sealed class MagicAgencyProductionTests
                 Capacity: 1.0m,
                 ImmutableDictionary<string, double>.Empty.Add(ActorStatKeys.Designing, 3)));
 
-        var state = DesignScenario(actors, MagicAgencySeed.ActorId);
+        var stock = Enchant(volume: 0, darkness: 2.0, fallacy: 1.0);
+        var state = WithDesignInput(DesignScenario(actors, MagicAgencySeed.ActorId), stock);
         var result = ProductionTick.AdvanceTickWithReport(state);
         var next = result.State;
 
-        Assert.Equal(
-            new SignalValue.Designs(1),
-            Signal(next, MagicAgencySeed.EnchantNodeId, MagicAgencySeed.DesignsPortId));
+        AssertCounts(
+            Signal(next, MagicAgencySeed.EnchantNodeId, MagicAgencySeed.EnchantmentPortId),
+            volume: 0,
+            darkness: 1.1,
+            fallacy: 1.0,
+            designs: 1);
         Assert.Equal(0, next.NodeProgress[MagicAgencySeed.DesignNodeId]);
         Assert.Equal(1, next.NodeCycles.GetValueOrDefault(MagicAgencySeed.DesignNodeId, 0));
         Assert.Equal(0, next.NodeCycles.GetValueOrDefault(MagicAgencySeed.SellNodeId, 0));
 
         var design = Row(result, MagicAgencySeed.DesignNodeId);
         Assert.Equal(1.0m, design.Effort);
-        Assert.Equal(new SignalValue.Designs(1), design.Produced);
-        Assert.False(design.Consumed);
+        Assert.True(design.Consumed);
+        AssertCounts(design.Produced, volume: 0, darkness: 1.1, fallacy: 1.0, designs: 1);
     }
 
     [Fact]
@@ -304,17 +329,21 @@ public sealed class MagicAgencyProductionTests
                 Capacity: 1.0m,
                 ImmutableDictionary<string, double>.Empty.Add(ActorStatKeys.Designing, 6)));
 
-        var state = DesignScenario(actors, MagicAgencySeed.ActorId);
+        var stock = Enchant(volume: 0, darkness: 2.0, fallacy: 0);
+        var state = WithDesignInput(DesignScenario(actors, MagicAgencySeed.ActorId), stock);
         var next = ProductionTick.AdvanceTick(state);
 
-        Assert.Equal(
-            new SignalValue.Designs(2),
-            Signal(next, MagicAgencySeed.EnchantNodeId, MagicAgencySeed.DesignsPortId));
+        AssertCounts(
+            Signal(next, MagicAgencySeed.EnchantNodeId, MagicAgencySeed.EnchantmentPortId),
+            volume: 0,
+            darkness: 0.2,
+            fallacy: 0,
+            designs: 2);
         Assert.Equal(2, next.NodeCycles.GetValueOrDefault(MagicAgencySeed.DesignNodeId, 0));
     }
 
     [Fact]
-    public void Design_AccumulatesProgressWhenUnderEffort()
+    public void Design_PassThroughWhenUnderEffort()
     {
         var actors = ImmutableDictionary<ActorId, Actor>.Empty.Add(
             MagicAgencySeed.ActorId,
@@ -323,18 +352,22 @@ public sealed class MagicAgencyProductionTests
                 Capacity: 1.0m,
                 ImmutableDictionary<string, double>.Empty.Add(ActorStatKeys.Designing, 2)));
 
-        var state = DesignScenario(actors, MagicAgencySeed.ActorId);
+        var stock = Enchant(volume: 5, darkness: 1.0, fallacy: 0);
+        var state = WithDesignInput(DesignScenario(actors, MagicAgencySeed.ActorId), stock);
         var next = ProductionTick.AdvanceTick(state);
 
-        Assert.False(
-            next.PortSignals.ContainsKey(
-                new PortKey(MagicAgencySeed.EnchantNodeId, MagicAgencySeed.DesignsPortId)));
+        AssertCounts(
+            Signal(next, MagicAgencySeed.EnchantNodeId, MagicAgencySeed.EnchantmentPortId),
+            volume: 5,
+            darkness: 1.0,
+            fallacy: 0,
+            designs: 0);
         Assert.Equal(2, next.NodeProgress[MagicAgencySeed.DesignNodeId]);
         Assert.Equal(0, next.NodeCycles.GetValueOrDefault(MagicAgencySeed.DesignNodeId, 0));
     }
 
     [Fact]
-    public void Enchant_OptionalDesignsInput_ReducesDarknessAccumulation()
+    public void Enchant_UsesDesignUnitsAtReducedDarkness()
     {
         var actors = ImmutableDictionary<ActorId, Actor>.Empty.Add(
             MagicAgencySeed.ActorId,
@@ -343,82 +376,90 @@ public sealed class MagicAgencyProductionTests
                 Capacity: 1.0m,
                 ImmutableDictionary<string, double>.Empty.Add(ActorStatKeys.Enchanting, 10)));
 
-        var state = WithDesignsStock(
-            DesignScenario(actors, MagicAgencySeed.ActorId),
-            1);
+        var genesis = EnchantmentBlock.CreateGenesis();
+        var (designed, nextId) = EnchantmentOps.ApplyDesign(
+            genesis,
+            DefaultConfigs.Design,
+            nextUnitId: 1,
+            applications: 4);
+        var stock = new SignalValue.Enchantment(designed);
+        var state = WithEnchantmentStock(
+            MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors) with
+            {
+                Actors = actors,
+                Assignments = ImmutableArray.Create(
+                    new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.EnchantNodeId)),
+                PortSignals = ImmutableDictionary<PortKey, SignalValue>.Empty.Add(
+                    new PortKey(MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId),
+                    new SignalValue.Money(100)),
+            },
+            new PortKey(MagicAgencySeed.EnchantNodeId, MagicAgencySeed.EnchantmentPortId),
+            stock,
+            nextId);
+
         var next = ProductionTick.AdvanceTick(state);
 
         AssertCounts(
             Signal(next, MagicAgencySeed.EnchantNodeId, MagicAgencySeed.EnchantmentPortId),
-            10,
-            1,
-            1);
-        Assert.False(
-            next.PortSignals.ContainsKey(
-                new PortKey(MagicAgencySeed.EnchantNodeId, MagicAgencySeed.DesignsPortId)));
+            volume: 10,
+            darkness: 4 * 0.3 + 6 * 1.0,
+            fallacy: 1.0,
+            designs: 4);
     }
 
     [Fact]
-    public void Enchant_DoesNotConsumeDesignsWithoutMutation()
+    public void DesignGraph_RoutesEnchantmentLoopThroughDesign()
     {
         var actors = ImmutableDictionary<ActorId, Actor>.Empty.Add(
             MagicAgencySeed.ActorId,
             new Actor(
                 MagicAgencySeed.ActorId,
                 Capacity: 1.0m,
-                ImmutableDictionary<string, double>.Empty.Add(ActorStatKeys.Enchanting, 4)));
+                ImmutableDictionary<string, double>.Empty
+                    .Add(ActorStatKeys.Enchanting, 10)
+                    .Add(ActorStatKeys.Designing, 3)));
+        var spec = new ScenarioSpec(
+            IncludeTesting: false,
+            ImmutableArray.Create(MagicAgencySeed.ActorId),
+            ImmutableArray.Create(
+                new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.EnchantNodeId)),
+            IncludeDesign: true);
+        var state = ScenarioBootstrap.Materialize(spec, DefaultConfigs, actors);
 
-        var state = WithDesignsStock(
-            DesignScenario(actors, MagicAgencySeed.ActorId),
-            2);
-        var next = ProductionTick.AdvanceTick(state);
-
+        var afterEnchant = ProductionTick.AdvanceTick(state);
         AssertCounts(
-            Signal(next, MagicAgencySeed.EnchantNodeId, MagicAgencySeed.EnchantmentPortId),
-            0,
-            0,
-            0);
-        Assert.Equal(
-            new SignalValue.Designs(2),
-            Signal(next, MagicAgencySeed.EnchantNodeId, MagicAgencySeed.DesignsPortId));
-        Assert.Equal(4, next.NodeProgress[MagicAgencySeed.EnchantNodeId]);
-    }
-
-    [Fact]
-    public void Enchant_ConsumesEntireDesignsStockOnMutation()
-    {
-        var actors = ImmutableDictionary<ActorId, Actor>.Empty.Add(
-            MagicAgencySeed.ActorId,
-            new Actor(
-                MagicAgencySeed.ActorId,
-                Capacity: 1.0m,
-                ImmutableDictionary<string, double>.Empty.Add(ActorStatKeys.Enchanting, 10)));
-
-        var state = WithDesignsStock(
-            DesignScenario(actors, MagicAgencySeed.ActorId),
-            5);
-        var next = ProductionTick.AdvanceTick(state);
-
-        AssertCounts(
-            Signal(next, MagicAgencySeed.EnchantNodeId, MagicAgencySeed.EnchantmentPortId),
+            Signal(afterEnchant, MagicAgencySeed.DesignNodeId, MagicAgencySeed.EnchantmentPortId),
             10,
-            0,
+            10,
             1);
         Assert.False(
-            next.PortSignals.ContainsKey(
-                new PortKey(MagicAgencySeed.EnchantNodeId, MagicAgencySeed.DesignsPortId)));
+            afterEnchant.PortSignals.ContainsKey(
+                new PortKey(MagicAgencySeed.EnchantNodeId, MagicAgencySeed.EnchantmentPortId)));
+
+        var designAssigned = afterEnchant with
+        {
+            Assignments = ImmutableArray.Create(
+                new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.DesignNodeId)),
+        };
+        var afterDesign = ProductionTick.AdvanceTick(designAssigned);
+        AssertCounts(
+            Signal(afterDesign, MagicAgencySeed.EnchantNodeId, MagicAgencySeed.EnchantmentPortId),
+            volume: 10,
+            darkness: 9.1,
+            fallacy: 1.0,
+            designs: 1);
     }
 
     [Fact]
-    public void SignalValue_TryCombine_AddsDesigns()
+    public void SignalValue_TryCombine_AddsMoney()
     {
         var blocks = ImmutableDictionary<string, EnchantmentBlock>.Empty;
         Assert.True(
             SignalValue.TryCombine(
-                [new SignalValue.Designs(2), new SignalValue.Designs(3)],
+                [new SignalValue.Money(2), new SignalValue.Money(3)],
                 blocks,
                 out var combined));
-        Assert.Equal(new SignalValue.Designs(5), combined);
+        Assert.Equal(new SignalValue.Money(5), combined);
     }
 
     [Fact]
@@ -545,7 +586,7 @@ public sealed class MagicAgencyProductionTests
         AssertCounts(
             Signal(next, MagicAgencySeed.EnchantNodeId, MagicAgencySeed.EnchantmentPortId),
             10,
-            2,
+            10,
             1);
         Assert.Equal(
             child.Hash,
@@ -890,14 +931,14 @@ public sealed class MagicAgencyProductionTests
         var genesis = EnchantmentBlock.CreateGenesis();
         var (once, next) = EnchantmentOps.Mutate(genesis, DefaultConfigs.Enchant, 1);
         Assert.Equal(10, once.VolumeCount);
-        Assert.Equal(2, once.DarknessCount);
-        Assert.Equal(1, once.FallacyCount);
+        Assert.Equal(10.0, once.Darkness);
+        Assert.Equal(1.0, once.Fallacy);
         Assert.Equal(9, new SignalValue.Enchantment(once).SellPayout(DefaultConfigs.Sell));
 
         var reduced = EnchantmentOps.ReduceFallacy(once, 5);
-        Assert.Equal(0, reduced.FallacyCount);
-        Assert.Equal(0, EnchantmentOps.ReduceFallacy(reduced, 99).FallacyCount);
-        Assert.Equal(14UL, next);
+        Assert.Equal(0, reduced.Fallacy);
+        Assert.Equal(0, EnchantmentOps.ReduceFallacy(reduced, 99).Fallacy);
+        Assert.Equal(11UL, next);
     }
 
     [Fact]
@@ -906,9 +947,12 @@ public sealed class MagicAgencyProductionTests
         var loaded = NodeTypeConfigLoader.LoadFromBaseDirectory();
 
         Assert.Equal(10, loaded.Enchant.Effort);
+        Assert.Equal(0.3, loaded.Enchant.DesignDarknessDelta);
         Assert.Equal(10, loaded.Testing.Effort);
         Assert.Equal(5, loaded.Testing.FallacyReduction);
         Assert.Equal(3, loaded.Design.Effort);
+        Assert.Equal(1, loaded.Design.DesignDelta);
+        Assert.Equal(0.9, loaded.Design.DarknessReduction);
         Assert.Equal(1, loaded.Merge.Effort);
         Assert.Equal(10, loaded.Sell.Effort);
         Assert.Equal(1, loaded.Treasury.Effort);

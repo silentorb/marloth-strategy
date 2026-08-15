@@ -12,13 +12,14 @@ public sealed class ScenarioTests
             Effort: 10,
             VolumeDelta: 10,
             DarknessDelta: 1,
-            FallacyConstant: 1),
+            FallacyConstant: 1,
+            DesignDarknessDelta: 0.3),
         new TestingNodeConfig(Effort: 10, FallacyReduction: 5),
         new SellNodeConfig(Effort: 10, PayoutFloor: 0),
         new TreasuryNodeConfig(Effort: 1),
         new PayrollNodeConfig(DefaultWage: 10, Period: 5, Effort: 1),
         new MergeNodeConfig(Effort: 1),
-        new DesignNodeConfig(Effort: 3));
+        new DesignNodeConfig(Effort: 3, DesignDelta: 1, DarknessReduction: 0.9));
 
     private static readonly ActorId ConsultantId = new("consultant");
 
@@ -103,7 +104,14 @@ public sealed class ScenarioTests
         Assert.True(catalog.Types.ContainsKey(MagicAgencySeed.MergeTypeId));
         Assert.True(catalog.Types.ContainsKey(MagicAgencySeed.DesignTypeId));
         Assert.True(
-            catalog.Get(MagicAgencySeed.EnchantTypeId).Inputs.ContainsKey(MagicAgencySeed.DesignsPortId));
+            catalog.Get(MagicAgencySeed.EnchantTypeId).Inputs.ContainsKey(
+                MagicAgencySeed.EnchantmentPortId));
+        Assert.True(
+            catalog.Get(MagicAgencySeed.DesignTypeId).Inputs.ContainsKey(
+                MagicAgencySeed.EnchantmentPortId));
+        Assert.True(
+            catalog.Get(MagicAgencySeed.DesignTypeId).Outputs.ContainsKey(
+                MagicAgencySeed.EnchantmentPortId));
     }
 
     [Fact]
@@ -136,7 +144,7 @@ public sealed class ScenarioTests
     }
 
     [Fact]
-    public void GraphFactory_Design_KeepsEnchantSellSpineAndAddsDesignsEdge()
+    public void GraphFactory_Design_RoutesLoopbackThroughDesign()
     {
         var (graph, catalog) = GraphFactory.Create(includeTesting: false, includeDesign: true);
 
@@ -144,20 +152,26 @@ public sealed class ScenarioTests
         Assert.Equal(5, graph.Edges.Count);
         Assert.True(graph.Nodes.ContainsKey(MagicAgencySeed.DesignNodeId));
         Assert.False(graph.Nodes.ContainsKey(MagicAgencySeed.TestingNodeId));
-        Assert.Contains(
+        Assert.DoesNotContain(
             graph.Edges.Values,
             e => e.From.Node == MagicAgencySeed.EnchantNodeId
                  && e.To.Node == MagicAgencySeed.EnchantNodeId);
         Assert.Contains(
             graph.Edges.Values,
             e => e.From.Node == MagicAgencySeed.EnchantNodeId
-                 && e.To.Node == MagicAgencySeed.SellNodeId);
+                 && e.To.Node == MagicAgencySeed.DesignNodeId
+                 && e.From.Port == MagicAgencySeed.EnchantmentPortId
+                 && e.To.Port == MagicAgencySeed.EnchantmentPortId);
         Assert.Contains(
             graph.Edges.Values,
             e => e.From.Node == MagicAgencySeed.DesignNodeId
-                 && e.From.Port == MagicAgencySeed.DesignsPortId
                  && e.To.Node == MagicAgencySeed.EnchantNodeId
-                 && e.To.Port == MagicAgencySeed.DesignsPortId);
+                 && e.From.Port == MagicAgencySeed.EnchantmentPortId
+                 && e.To.Port == MagicAgencySeed.EnchantmentPortId);
+        Assert.Contains(
+            graph.Edges.Values,
+            e => e.From.Node == MagicAgencySeed.EnchantNodeId
+                 && e.To.Node == MagicAgencySeed.SellNodeId);
         Assert.True(catalog.Types.ContainsKey(MagicAgencySeed.DesignTypeId));
     }
 

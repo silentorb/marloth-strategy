@@ -5,7 +5,8 @@ namespace MarlothStrategy.Simulation.Production;
 
 /// <summary>
 /// Strongly typed signal payload: resources (additive) or information (copied/mutated).
-/// Money amounts remain floating-point; designs and enchantment properties are discrete counts.
+/// Money amounts remain floating-point; enchantment volume/designs are discrete unit counts;
+/// darkness and fallacy are floating-point scalars on the enchantment block.
 /// </summary>
 public abstract record SignalValue(SignalTypeId TypeId)
 {
@@ -21,16 +22,6 @@ public abstract record SignalValue(SignalTypeId TypeId)
         public Money WithAmount(double amount) => new(amount);
     }
 
-    /// <summary>Resource: discrete design units owned on a port. Routing adds counts.</summary>
-    public sealed record Designs(int Amount) : SignalValue(SignalTypes.Designs)
-    {
-        public override SignalKind Kind => SignalKind.Resource;
-
-        public Designs Add(int delta) => new(Amount + delta);
-
-        public Designs WithAmount(int amount) => new(amount);
-    }
-
     /// <summary>
     /// Information: a single enchantment block. Copied on route; fan-in combines via
     /// <see cref="EnchantmentOps.TryCombine"/> (the information <c>+</c> operator).
@@ -41,9 +32,11 @@ public abstract record SignalValue(SignalTypeId TypeId)
 
         public int Volume => Block.VolumeCount;
 
-        public int Darkness => Block.DarknessCount;
+        public int Designs => Block.DesignsCount;
 
-        public int Fallacy => Block.FallacyCount;
+        public double Darkness => Block.Darkness;
+
+        public double Fallacy => Block.Fallacy;
 
         public string Hash => Block.Hash;
 
@@ -57,7 +50,6 @@ public abstract record SignalValue(SignalTypeId TypeId)
     public SignalValue Copy() => this switch
     {
         Money m => new Money(m.Amount),
-        Designs d => new Designs(d.Amount),
         Enchantment e => new Enchantment(e.Block),
         _ => throw new InvalidOperationException($"Unknown signal value kind: {GetType().Name}."),
     };
@@ -78,13 +70,12 @@ public abstract record SignalValue(SignalTypeId TypeId)
         return this switch
         {
             Money m when other is Money o => m.Add(o.Amount),
-            Designs d when other is Designs o => d.Add(o.Amount),
             _ => throw new InvalidOperationException($"Unsupported resource add for {TypeId}."),
         };
     }
 
     /// <summary>
-    /// Combines same-typed signals (<c>+</c>): money and designs add; enchantment uses
+    /// Combines same-typed signals (<c>+</c>): money adds; enchantment uses
     /// <see cref="EnchantmentOps.TryCombine"/>. Returns <c>false</c> when the set is empty
     /// or enchantment histories are incompatible (destination should be empty).
     /// </summary>
@@ -117,7 +108,6 @@ public abstract record SignalValue(SignalTypeId TypeId)
         switch (first)
         {
             case Money:
-            case Designs:
                 SignalValue acc = first;
                 for (var i = 1; i < values.Count; i++)
                 {
@@ -148,7 +138,7 @@ public abstract record SignalValue(SignalTypeId TypeId)
         }
     }
 
-    public bool IsEmptyResource => this is Money { Amount: 0 } or Designs { Amount: 0 };
+    public bool IsEmptyResource => this is Money { Amount: 0 };
 }
 
 public enum SignalKind
@@ -161,5 +151,4 @@ public static class SignalTypes
 {
     public static readonly SignalTypeId Money = new("money");
     public static readonly SignalTypeId Enchantment = new("enchantment");
-    public static readonly SignalTypeId Designs = new("designs");
 }

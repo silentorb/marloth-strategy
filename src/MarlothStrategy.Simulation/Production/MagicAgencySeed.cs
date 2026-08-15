@@ -26,7 +26,6 @@ public static class MagicAgencySeed
 
     public static readonly PortId MoneyPortId = new("money");
     public static readonly PortId EnchantmentPortId = new("enchantment");
-    public static readonly PortId DesignsPortId = new("designs");
     public static readonly PortId PrimaryPortId = new("primary");
     public static readonly PortId SecondaryPortId = new("secondary");
 

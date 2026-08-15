@@ -10,13 +10,14 @@ public sealed class FlowGraphPrinterTests
             Effort: 10,
             VolumeDelta: 10,
             DarknessDelta: 1,
-            FallacyConstant: 1),
+            FallacyConstant: 1,
+            DesignDarknessDelta: 0.3),
         new TestingNodeConfig(Effort: 10, FallacyReduction: 5),
         new SellNodeConfig(Effort: 10, PayoutFloor: 0),
         new TreasuryNodeConfig(Effort: 1),
         new PayrollNodeConfig(DefaultWage: 10, Period: 5, Effort: 1),
         new MergeNodeConfig(Effort: 1),
-        new DesignNodeConfig(Effort: 3));
+        new DesignNodeConfig(Effort: 3, DesignDelta: 1, DarknessReduction: 0.9));
 
     private static readonly ImmutableDictionary<ActorId, Actor> DefaultActors =
         ImmutableDictionary<ActorId, Actor>.Empty

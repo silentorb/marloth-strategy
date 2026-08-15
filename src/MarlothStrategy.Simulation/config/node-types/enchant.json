@@ -2,5 +2,6 @@
   "effort": 10,
   "volumeDelta": 10,
   "darknessDelta": 1,
-  "fallacyConstant": 1
+  "fallacyConstant": 1,
+  "designDarknessDelta": 0.3
 }

@@ -1,3 +1,5 @@
 {
-  "effort": 3
+  "effort": 3,
+  "designDelta": 1,
+  "darknessReduction": 0.9
 }

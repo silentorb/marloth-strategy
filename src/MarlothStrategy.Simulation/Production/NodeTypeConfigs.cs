@@ -5,7 +5,8 @@ public sealed record EnchantNodeConfig(
     double Effort,
     double VolumeDelta,
     double DarknessDelta,
-    double FallacyConstant);
+    double FallacyConstant,
+    double DesignDarknessDelta);
 
 /// <summary>Numeric parameters for the testing node type (loaded from JSON).</summary>
 public sealed record TestingNodeConfig(
@@ -30,7 +31,10 @@ public sealed record PayrollNodeConfig(
 public sealed record MergeNodeConfig(double Effort);
 
 /// <summary>Numeric parameters for the design node type (loaded from JSON).</summary>
-public sealed record DesignNodeConfig(double Effort);
+public sealed record DesignNodeConfig(
+    double Effort,
+    double DesignDelta,
+    double DarknessReduction);
 
 /// <summary>Loaded per-type behavior numerics attached to <see cref="GameState"/>.</summary>
 public sealed record NodeTypeConfigs(

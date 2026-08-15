@@ -33,21 +33,20 @@ public static class GraphFactory
     {
         var moneyType = new SignalType(SignalTypes.Money);
         var enchantmentType = new SignalType(SignalTypes.Enchantment);
-        var designsType = new SignalType(SignalTypes.Designs);
 
         var enchantType = new NodeType(
             MagicAgencySeed.EnchantTypeId,
             ImmutableDictionary<PortId, Port>.Empty
-                .Add(MagicAgencySeed.EnchantmentPortId, new Port(MagicAgencySeed.EnchantmentPortId, enchantmentType))
-                .Add(MagicAgencySeed.DesignsPortId, new Port(MagicAgencySeed.DesignsPortId, designsType)),
+                .Add(MagicAgencySeed.EnchantmentPortId, new Port(MagicAgencySeed.EnchantmentPortId, enchantmentType)),
             ImmutableDictionary<PortId, Port>.Empty
                 .Add(MagicAgencySeed.EnchantmentPortId, new Port(MagicAgencySeed.EnchantmentPortId, enchantmentType)));
 
         var designType = new NodeType(
             MagicAgencySeed.DesignTypeId,
-            ImmutableDictionary<PortId, Port>.Empty,
             ImmutableDictionary<PortId, Port>.Empty
-                .Add(MagicAgencySeed.DesignsPortId, new Port(MagicAgencySeed.DesignsPortId, designsType)));
+                .Add(MagicAgencySeed.EnchantmentPortId, new Port(MagicAgencySeed.EnchantmentPortId, enchantmentType)),
+            ImmutableDictionary<PortId, Port>.Empty
+                .Add(MagicAgencySeed.EnchantmentPortId, new Port(MagicAgencySeed.EnchantmentPortId, enchantmentType)));
 
         var testingType = new NodeType(
             MagicAgencySeed.TestingTypeId,
@@ -177,21 +176,44 @@ public static class GraphFactory
     }
 
     /// <summary>
-    /// Design variation: keep the essential enchantment and money spine, add a design
-    /// source feeding <c>enchant.designs</c>.
+    /// Design variation: route all enchantment loopback through design so design is the
+    /// sole input into enchant; keep enchant fan-out to sell and the money spine.
     /// </summary>
     public static NodeGraph CreateDesignGraph()
     {
-        var essential = CreateEssentialGraph();
         return new NodeGraph(
-            essential.Nodes.Add(
-                MagicAgencySeed.DesignNodeId,
-                new Node(MagicAgencySeed.DesignNodeId, MagicAgencySeed.DesignTypeId)),
-            essential.Edges.Add(
-                new EdgeId("designs-to-enchant"),
-                new Edge(
-                    new PortReference(MagicAgencySeed.DesignNodeId, MagicAgencySeed.DesignsPortId),
-                    new PortReference(MagicAgencySeed.EnchantNodeId, MagicAgencySeed.DesignsPortId))));
+            ImmutableDictionary<NodeId, Node>.Empty
+                .Add(MagicAgencySeed.EnchantNodeId, new Node(MagicAgencySeed.EnchantNodeId, MagicAgencySeed.EnchantTypeId))
+                .Add(MagicAgencySeed.DesignNodeId, new Node(MagicAgencySeed.DesignNodeId, MagicAgencySeed.DesignTypeId))
+                .Add(MagicAgencySeed.SellNodeId, new Node(MagicAgencySeed.SellNodeId, MagicAgencySeed.SellTypeId))
+                .Add(MagicAgencySeed.TreasuryNodeId, new Node(MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.TreasuryTypeId))
+                .Add(MagicAgencySeed.PayrollNodeId, new Node(MagicAgencySeed.PayrollNodeId, MagicAgencySeed.PayrollTypeId)),
+            ImmutableDictionary<EdgeId, Edge>.Empty
+                .Add(
+                    new EdgeId("enchantment-to-design"),
+                    new Edge(
+                        new PortReference(MagicAgencySeed.EnchantNodeId, MagicAgencySeed.EnchantmentPortId),
+                        new PortReference(MagicAgencySeed.DesignNodeId, MagicAgencySeed.EnchantmentPortId)))
+                .Add(
+                    new EdgeId("design-to-enchant"),
+                    new Edge(
+                        new PortReference(MagicAgencySeed.DesignNodeId, MagicAgencySeed.EnchantmentPortId),
+                        new PortReference(MagicAgencySeed.EnchantNodeId, MagicAgencySeed.EnchantmentPortId)))
+                .Add(
+                    new EdgeId("enchantment-to-sell"),
+                    new Edge(
+                        new PortReference(MagicAgencySeed.EnchantNodeId, MagicAgencySeed.EnchantmentPortId),
+                        new PortReference(MagicAgencySeed.SellNodeId, MagicAgencySeed.EnchantmentPortId)))
+                .Add(
+                    new EdgeId("money-to-treasury"),
+                    new Edge(
+                        new PortReference(MagicAgencySeed.SellNodeId, MagicAgencySeed.MoneyPortId),
+                        new PortReference(MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId)))
+                .Add(
+                    new EdgeId("treasury-to-payroll"),
+                    new Edge(
+                        new PortReference(MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId),
+                        new PortReference(MagicAgencySeed.PayrollNodeId, MagicAgencySeed.MoneyPortId))));
     }
 
     /// <summary>
