@@ -10,9 +10,17 @@ public static class TickReportPrinter
 {
     private const char Arrow = '\u2192';
     private const string DeltaCaption = "\u0394";
+
+    /// <summary>Cells reserved for values; long property names clip before values do.</summary>
+    private const int MinValueWidth = 8;
+
     public const string Title = "Marloth Strategy";
 
-    private readonly record struct NodeStateRow(string Text, string Delta);
+    /// <summary>One body row: indented property name, its value, and the optional Δ cell.</summary>
+    private readonly record struct NodeStateRow(string Key, string Value, string Delta);
+
+    /// <summary>Column metrics shared by every node subpanel so cells align down the screen.</summary>
+    private readonly record struct ColumnMetrics(int LongestKey, int ValuePrefix, int DeltaPrefix);
 
     public static string FormatScreen(
         GameState state,
@@ -41,10 +49,30 @@ public static class TickReportPrinter
         // WritePadded reserves one cell of left margin inside the column.
         var usableLeftWidth = Math.Max(1, leftInteriorWidth - 1);
 
-        var leftSubpanels = new List<IReadOnlyList<string>>(nodes.Length);
-        foreach (var nodeId in nodes)
+        var bodies = nodes
+            .Select(id => (
+                Id: id,
+                Rows: FormatNodeStateRows(state, previous, baseline, id),
+                Assignments: FormatNodeAssignmentLines(state, id)))
+            .ToArray();
+
+        // Metrics span every node subpanel so columns line up down the whole left column.
+        var allRows = bodies.SelectMany(b => b.Rows).ToArray();
+        var metrics = new ColumnMetrics(
+            PanelColumns.LongestKey(allRows.Select(r => r.Key)),
+            PanelColumns.NumericPrefixWidth(allRows.Select(r => r.Value)),
+            PanelColumns.NumericPrefixWidth(allRows.Select(r => r.Delta)));
+
+        var leftSubpanels = new List<PanelSubpanel>(nodes.Length);
+        foreach (var body in bodies)
         {
-            leftSubpanels.Add(FormatNodeLines(state, previous, baseline, nodeId, usableLeftWidth));
+            var lines = MergeNodeColumns(
+                body.Rows,
+                body.Assignments,
+                usableLeftWidth,
+                includeDelta: baseline is not null,
+                metrics);
+            leftSubpanels.Add(new PanelSubpanel(body.Id.Value, lines));
         }
 
         var rightInteriorWidth = width - leftInteriorWidth - 3;
@@ -89,28 +117,18 @@ public static class TickReportPrinter
         return $"{position.Name} {position.Index}";
     }
 
-    private static List<string> FormatNodeLines(
-        GameState state,
-        GameState? previous,
-        GameState? baseline,
-        NodeId nodeId,
-        int usableWidth)
-    {
-        var stateRows = FormatNodeStateRows(state, previous, baseline, nodeId);
-        var assignmentLines = FormatNodeAssignmentLines(state, nodeId);
-        return MergeNodeColumns(stateRows, assignmentLines, usableWidth, includeDelta: baseline is not null);
-    }
-
     private static List<NodeStateRow> FormatNodeStateRows(
         GameState state,
         GameState? previous,
         GameState? baseline,
         NodeId nodeId)
     {
-        var rows = new List<NodeStateRow>
+        var rows = new List<NodeStateRow>();
+        if (baseline is not null)
         {
-            new($"{nodeId.Value}:", baseline is null ? string.Empty : DeltaCaption),
-        };
+            // Column header for Δ; node id lives in the subpanel title rule.
+            rows.Add(new(string.Empty, string.Empty, DeltaCaption));
+        }
 
         var node = state.Graph.Nodes[nodeId];
         var nodeType = state.Catalog.Get(node.Type);
@@ -136,12 +154,12 @@ public static class TickReportPrinter
         var cycles = FormatInt(state.NodeCycles.GetValueOrDefault(nodeId, 0));
         if (previous is null)
         {
-            rows.Add(new($"  cycles: {cycles}", string.Empty));
+            rows.Add(new("  cycles:", cycles, string.Empty));
             return rows;
         }
 
         var priorCycles = FormatInt(previous.NodeCycles.GetValueOrDefault(nodeId, 0));
-        rows.Add(new($"  cycles: {FormatChange(priorCycles, cycles)}", string.Empty));
+        rows.Add(new("  cycles:", FormatChange(priorCycles, cycles), string.Empty));
         return rows;
     }
 
@@ -155,85 +173,82 @@ public static class TickReportPrinter
     }
 
     /// <summary>
-    /// Horizontally splits a node subpanel: state | optional Δ | preferred assignments.
+    /// Horizontally splits a node subpanel: property name | value | optional Δ | preferred assignments.
     /// </summary>
     private static List<string> MergeNodeColumns(
         IReadOnlyList<NodeStateRow> stateRows,
         IReadOnlyList<string> assignmentLines,
         int usableWidth,
-        bool includeDelta)
+        bool includeDelta,
+        ColumnMetrics metrics)
     {
         if (usableWidth < 3)
         {
             // Too narrow for a split — prefer state content.
-            return stateRows.Select(r => r.Text).ToList();
+            return stateRows.Select(FlattenRow).ToList();
         }
 
         // Right column sized for short "actor weight" rows; prefer room for state leaves.
         var assignWidth = Math.Clamp(usableWidth / 4, 8, 10);
         if (!includeDelta || usableWidth < assignWidth + 1 + 6 + 1 + 8)
         {
-            // Not enough room for three columns — fall back to state | assignments.
-            var stateWidthTwo = usableWidth - 1 - assignWidth;
-            return MergeTwoColumns(
-                stateRows.Select(r => r.Text).ToList(),
+            // Not enough room for a Δ column — fall back to name | value | assignments.
+            return MergeStateColumns(
+                stateRows,
                 assignmentLines,
-                stateWidthTwo,
-                assignWidth);
+                usableWidth - 1 - assignWidth,
+                deltaWidth: 0,
+                assignWidth,
+                metrics);
         }
 
         var deltaWidth = Math.Clamp(usableWidth / 8, 6, 8);
         var stateWidth = usableWidth - 1 - deltaWidth - 1 - assignWidth;
+        return MergeStateColumns(stateRows, assignmentLines, stateWidth, deltaWidth, assignWidth, metrics);
+    }
+
+    private static List<string> MergeStateColumns(
+        IReadOnlyList<NodeStateRow> stateRows,
+        IReadOnlyList<string> assignmentLines,
+        int stateWidth,
+        int deltaWidth,
+        int assignWidth,
+        ColumnMetrics metrics)
+    {
+        if (stateWidth < 3)
+        {
+            return stateRows.Select(FlattenRow).ToList();
+        }
+
+        var keyWidth = PanelColumns.KeyColumnWidth(metrics.LongestKey, stateWidth, MinValueWidth);
+        var valueWidth = stateWidth - 1 - keyWidth;
         var rowCount = Math.Max(1, Math.Max(stateRows.Count, assignmentLines.Count));
         var merged = new List<string>(rowCount);
 
         for (var i = 0; i < rowCount; i++)
         {
-            var left = i < stateRows.Count ? stateRows[i].Text : string.Empty;
-            var mid = i < stateRows.Count ? stateRows[i].Delta : string.Empty;
+            var key = i < stateRows.Count ? stateRows[i].Key : string.Empty;
+            var value = i < stateRows.Count ? stateRows[i].Value : string.Empty;
+            var delta = i < stateRows.Count ? stateRows[i].Delta : string.Empty;
             var right = i < assignmentLines.Count ? assignmentLines[i] : string.Empty;
-            merged.Add(
-                $"{ClipPad(left, stateWidth)}{BoxDrawing.SingleVertical}" +
-                $"{ClipPad(mid, deltaWidth)}{BoxDrawing.SingleVertical}" +
-                $"{ClipPad(right, assignWidth)}");
+
+            var line =
+                $"{PanelColumns.ClipPad(key, keyWidth)}{BoxDrawing.SingleVertical}" +
+                $"{PanelColumns.ClipPad(PanelColumns.AlignNumeric(value, metrics.ValuePrefix), valueWidth)}";
+            if (deltaWidth > 0)
+            {
+                var aligned = PanelColumns.AlignNumeric(delta, metrics.DeltaPrefix);
+                line += $"{BoxDrawing.SingleVertical}{PanelColumns.ClipPad(aligned, deltaWidth)}";
+            }
+
+            merged.Add($"{line}{BoxDrawing.SingleVertical}{PanelColumns.ClipPad(right, assignWidth)}");
         }
 
         return merged;
     }
 
-    private static List<string> MergeTwoColumns(
-        IReadOnlyList<string> stateLines,
-        IReadOnlyList<string> assignmentLines,
-        int stateWidth,
-        int assignWidth)
-    {
-        var rowCount = Math.Max(1, Math.Max(stateLines.Count, assignmentLines.Count));
-        var merged = new List<string>(rowCount);
-        for (var i = 0; i < rowCount; i++)
-        {
-            var left = i < stateLines.Count ? stateLines[i] : string.Empty;
-            var right = i < assignmentLines.Count ? assignmentLines[i] : string.Empty;
-            merged.Add(
-                $"{ClipPad(left, stateWidth)}{BoxDrawing.SingleVertical}{ClipPad(right, assignWidth)}");
-        }
-
-        return merged;
-    }
-
-    private static string ClipPad(string text, int width)
-    {
-        if (width <= 0)
-        {
-            return string.Empty;
-        }
-
-        if (text.Length > width)
-        {
-            return text[..width];
-        }
-
-        return text.PadRight(width);
-    }
+    private static string FlattenRow(NodeStateRow row) =>
+        row.Value.Length == 0 ? row.Key : $"{row.Key} {row.Value}";
 
     private static bool ShowsCycles(NodeTypeId typeId) =>
         typeId == MagicAgencySeed.EnchantTypeId
@@ -269,12 +284,12 @@ public static class TickReportPrinter
                     RoundedResource(current) + RoundAway(state.PortFlowTotals.GetValueOrDefault(key)));
             if (previous is null)
             {
-                rows.Add(new($"  {port.Id.Value}: {currentText}", delta));
+                rows.Add(new($"  {port.Id.Value}:", currentText, delta));
                 return;
             }
 
             var priorText = FormatResourceLeaf(prior);
-            rows.Add(new($"  {port.Id.Value}: {FormatChange(priorText, currentText)}", delta));
+            rows.Add(new($"  {port.Id.Value}:", FormatChange(priorText, currentText), delta));
             return;
         }
 
@@ -285,13 +300,13 @@ public static class TickReportPrinter
 
         if (currentInfo is null && (previous is null || priorInfo is null))
         {
-            rows.Add(new($"  {port.Id.Value}: 0", string.Empty));
+            rows.Add(new($"  {port.Id.Value}:", "0", string.Empty));
             return;
         }
 
         if (currentInfo is null && priorInfo is not null)
         {
-            rows.Add(new($"  {port.Id.Value}:", string.Empty));
+            rows.Add(new($"  {port.Id.Value}:", string.Empty, string.Empty));
             AppendEnchantmentLeaf(rows, "hash", priorInfo.Block.AbbreviatedHash, "0", string.Empty);
             AppendEnchantmentLeaf(
                 rows,
@@ -321,21 +336,25 @@ public static class TickReportPrinter
         }
 
         // current present
-        rows.Add(new($"  {port.Id.Value}:", string.Empty));
+        rows.Add(new($"  {port.Id.Value}:", string.Empty, string.Empty));
         if (previous is null)
         {
-            rows.Add(new($"    hash: {currentInfo!.Block.AbbreviatedHash}", string.Empty));
+            rows.Add(new("    hash:", currentInfo!.Block.AbbreviatedHash, string.Empty));
             rows.Add(new(
-                $"    volume: {FormatRounded(currentInfo.Volume)}",
+                "    volume:",
+                FormatRounded(currentInfo.Volume),
                 FormatCountDelta(baseline, baseInfo?.Volume ?? 0, currentInfo.Volume)));
             rows.Add(new(
-                $"    designs: {FormatRounded(currentInfo.Designs)}",
+                "    designs:",
+                FormatRounded(currentInfo.Designs),
                 FormatCountDelta(baseline, baseInfo?.Designs ?? 0, currentInfo.Designs)));
             rows.Add(new(
-                $"    darkness: {FormatScalar(currentInfo.Darkness)}",
+                "    darkness:",
+                FormatScalar(currentInfo.Darkness),
                 FormatScalarDelta(baseline, baseInfo?.Darkness ?? 0, currentInfo.Darkness)));
             rows.Add(new(
-                $"    fallacy: {FormatScalar(currentInfo.Fallacy)}",
+                "    fallacy:",
+                FormatScalar(currentInfo.Fallacy),
                 FormatScalarDelta(baseline, baseInfo?.Fallacy ?? 0, currentInfo.Fallacy)));
             return;
         }
@@ -383,7 +402,7 @@ public static class TickReportPrinter
         string prior,
         string current,
         string delta) =>
-        rows.Add(new($"    {name}: {FormatChange(prior, current)}", delta));
+        rows.Add(new($"    {name}:", FormatChange(prior, current), delta));
 
     private static string FormatCountDelta(GameState? baseline, double baseAmount, double currentAmount) =>
         baseline is null ? string.Empty : FormatSignedDelta(RoundAway(baseAmount), RoundAway(currentAmount));

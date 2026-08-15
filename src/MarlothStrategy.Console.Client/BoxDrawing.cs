@@ -38,4 +38,7 @@ public static class BoxDrawing
     public const char MixedTeeTop = '╤';
     public const char MixedTeeBottom = '╧';
     public const char MixedCrossDoubleH = '╪';
+
+    /// <summary>Single vertical continuing up/down with a double horizontal arriving from the left.</summary>
+    public const char MixedTeeRightDoubleH = '╡';
 }

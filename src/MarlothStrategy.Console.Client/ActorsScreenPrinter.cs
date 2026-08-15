@@ -7,6 +7,12 @@ namespace MarlothStrategy.Console.Client;
 /// <summary>Formats the actors modal screen: one full-width subpanel per actor.</summary>
 public static class ActorsScreenPrinter
 {
+    /// <summary>Cells reserved for values; long property names clip before values do.</summary>
+    private const int MinValueWidth = 8;
+
+    /// <summary>One body row: indented property name and its value.</summary>
+    private readonly record struct ActorPropertyRow(string Key, string Value);
+
     public static string FormatScreen(
         GameState state,
         GameState? previous = null,
@@ -25,52 +31,56 @@ public static class ActorsScreenPrinter
         // WritePadded reserves one cell of left margin inside the column.
         var usableWidth = Math.Max(1, interiorWidth - 1);
 
-        var subpanels = new List<IReadOnlyList<string>>();
+        var subpanels = new List<PanelSubpanel>();
         if (state.Actors.IsEmpty)
         {
-            subpanels.Add(["actors: 0"]);
+            subpanels.Add(new PanelSubpanel(["actors: 0"]));
+            return PanelLayout.ComposeStacked(header, subpanels, width);
         }
-        else
+
+        var bodies = state.Actors.Keys
+            .OrderBy(id => id.Value, StringComparer.Ordinal)
+            .Select(id => (
+                Id: id,
+                Rows: FormatPropertyRows(state.Actors[id]),
+                Assignments: FormatAssignmentLines(state, id)))
+            .ToArray();
+
+        // Metrics span every actor so columns line up down the screen.
+        var allRows = bodies.SelectMany(b => b.Rows).ToArray();
+        var longestKey = PanelColumns.LongestKey(allRows.Select(r => r.Key));
+        var valuePrefix = PanelColumns.NumericPrefixWidth(allRows.Select(r => r.Value));
+
+        foreach (var body in bodies)
         {
-            foreach (var actorId in state.Actors.Keys.OrderBy(id => id.Value, StringComparer.Ordinal))
-            {
-                var actor = state.Actors[actorId];
-                subpanels.Add(FormatActorSubpanel(state, actor, usableWidth));
-            }
+            var lines = MergeActorColumns(body.Rows, body.Assignments, usableWidth, longestKey, valuePrefix);
+            subpanels.Add(new PanelSubpanel(body.Id.Value, lines));
         }
 
         return PanelLayout.ComposeStacked(header, subpanels, width);
     }
 
-    private static List<string> FormatActorSubpanel(GameState state, Actor actor, int usableWidth)
+    private static List<ActorPropertyRow> FormatPropertyRows(Actor actor)
     {
-        var propertyLines = FormatPropertyLines(actor);
-        var assignmentLines = FormatAssignmentLines(state, actor.Id);
-        return MergeTwoColumns(propertyLines, assignmentLines, usableWidth);
-    }
-
-    private static List<string> FormatPropertyLines(Actor actor)
-    {
-        var lines = new List<string>
+        var rows = new List<ActorPropertyRow>
         {
-            $"{actor.Id.Value}:",
-            $"  capacity: {DisplayFormatting.FormatDecimal(actor.Capacity)}",
-            $"  wage: {FormatWage(actor.Wage)}",
+            new("  capacity:", DisplayFormatting.FormatDecimal(actor.Capacity)),
+            new("  wage:", FormatWage(actor.Wage)),
         };
 
         if (actor.Stats.IsEmpty)
         {
-            lines.Add("  stats: none");
-            return lines;
+            rows.Add(new("  stats:", "none"));
+            return rows;
         }
 
-        lines.Add("  stats:");
+        rows.Add(new("  stats:", string.Empty));
         foreach (var key in actor.Stats.Keys.OrderBy(k => k, StringComparer.Ordinal))
         {
-            lines.Add($"    {key}: {FormatStat(actor.Stats[key])}");
+            rows.Add(new($"    {key}:", FormatStat(actor.Stats[key])));
         }
 
-        return lines;
+        return rows;
     }
 
     private static List<string> FormatAssignmentLines(GameState state, ActorId actorId)
@@ -82,50 +92,46 @@ public static class ActorsScreenPrinter
             .ToList();
     }
 
-    private static List<string> MergeTwoColumns(
-        IReadOnlyList<string> propertyLines,
+    /// <summary>Splits an actor subpanel: property name | value | preferred assignments.</summary>
+    private static List<string> MergeActorColumns(
+        IReadOnlyList<ActorPropertyRow> propertyRows,
         IReadOnlyList<string> assignmentLines,
-        int usableWidth)
+        int usableWidth,
+        int longestKey,
+        int valuePrefix)
     {
         if (usableWidth < 3)
         {
-            return propertyLines.ToList();
+            return propertyRows.Select(FlattenRow).ToList();
         }
 
         var assignWidth = Math.Clamp(usableWidth / 3, 10, 24);
         if (usableWidth < assignWidth + 1 + 8)
         {
-            return propertyLines.ToList();
+            return propertyRows.Select(FlattenRow).ToList();
         }
 
         var propWidth = usableWidth - 1 - assignWidth;
-        var rowCount = Math.Max(1, Math.Max(propertyLines.Count, assignmentLines.Count));
+        var keyWidth = PanelColumns.KeyColumnWidth(longestKey, propWidth, MinValueWidth);
+        var valueWidth = propWidth - 1 - keyWidth;
+        var rowCount = Math.Max(1, Math.Max(propertyRows.Count, assignmentLines.Count));
         var merged = new List<string>(rowCount);
         for (var i = 0; i < rowCount; i++)
         {
-            var left = i < propertyLines.Count ? propertyLines[i] : string.Empty;
+            var key = i < propertyRows.Count ? propertyRows[i].Key : string.Empty;
+            var value = i < propertyRows.Count ? propertyRows[i].Value : string.Empty;
             var right = i < assignmentLines.Count ? assignmentLines[i] : string.Empty;
             merged.Add(
-                $"{ClipPad(left, propWidth)}{BoxDrawing.SingleVertical}{ClipPad(right, assignWidth)}");
+                $"{PanelColumns.ClipPad(key, keyWidth)}{BoxDrawing.SingleVertical}" +
+                $"{PanelColumns.ClipPad(PanelColumns.AlignNumeric(value, valuePrefix), valueWidth)}" +
+                $"{BoxDrawing.SingleVertical}{PanelColumns.ClipPad(right, assignWidth)}");
         }
 
         return merged;
     }
 
-    private static string ClipPad(string text, int width)
-    {
-        if (width <= 0)
-        {
-            return string.Empty;
-        }
-
-        if (text.Length > width)
-        {
-            return text[..width];
-        }
-
-        return text.PadRight(width);
-    }
+    private static string FlattenRow(ActorPropertyRow row) =>
+        row.Value.Length == 0 ? row.Key : $"{row.Key} {row.Value}";
 
     private static string FormatWage(double? wage) =>
         wage is null ? "none" : FormatStat(wage.Value);

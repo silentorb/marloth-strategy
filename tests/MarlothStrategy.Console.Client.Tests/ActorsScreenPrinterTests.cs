@@ -56,22 +56,29 @@ public sealed class ActorsScreenPrinterTests
         Assert.Contains("month 1, week 1/4, day 1/7", text);
         Assert.Contains("screen: actors", text);
         Assert.Contains("actors: boss, intern", text);
-        Assert.Contains("intern:", text);
-        Assert.Contains("boss:", text);
-        Assert.Contains("capacity: 1", text);
-        Assert.Contains("wage: 2", text);
-        Assert.Contains("wage: 3", text);
-        Assert.Contains("enchanting: 10", text);
-        Assert.Contains("sales: 10", text);
-        Assert.Contains("payroll: 10", text);
-        Assert.Contains("treasury: 10", text);
+        Assert.Contains("  intern  ", text);
+        Assert.Contains("  boss  ", text);
+        Assert.DoesNotContain("intern:", text);
+        Assert.DoesNotContain("boss:", text);
+
+        // Values live in their own column; nested stat keys keep their deeper indentation.
+        AssertValue(normalized, "  intern  ", "  capacity:", "1");
+        AssertValue(normalized, "  intern  ", "  wage:", "2");
+        AssertValue(normalized, "  intern  ", "  stats:", string.Empty);
+        AssertValue(normalized, "  intern  ", "    enchanting:", "10");
+        AssertValue(normalized, "  intern  ", "    sales:", "10");
+        AssertValue(normalized, "  boss  ", "  wage:", "3");
+        AssertValue(normalized, "  boss  ", "    payroll:", "10");
+        AssertValue(normalized, "  boss  ", "    treasury:", "10");
         Assert.Contains("enchant 1", text);
         Assert.Contains("testing 1", text);
         Assert.Contains("payroll 1", text);
         Assert.Contains("sell 1", text);
         Assert.Contains("treasury 1", text);
-        Assert.Contains($"{BoxDrawing.MixedTeeLeft}", normalized);
-        Assert.Contains($"{BoxDrawing.MixedTeeRight}", normalized);
+        Assert.Contains($"{BoxDrawing.DoubleTeeLeft}", normalized);
+        Assert.Contains($"{BoxDrawing.DoubleTeeRight}", normalized);
+        Assert.DoesNotContain($"{BoxDrawing.MixedTeeLeft}", normalized);
+        Assert.DoesNotContain($"{BoxDrawing.MixedTeeRight}", normalized);
         Assert.DoesNotContain("screen: workflow", text);
     }
 
@@ -94,9 +101,11 @@ public sealed class ActorsScreenPrinterTests
 
         var text = ActorsScreenPrinter.FormatScreen(state, width: PanelLayout.DefaultWidth);
 
-        Assert.Contains("volunteer:", text);
-        Assert.Contains("wage: none", text);
-        Assert.Contains("capacity: 0.5", text);
+        var normalized = text.Replace("\r\n", "\n");
+        Assert.Contains("  volunteer  ", text);
+        Assert.DoesNotContain("volunteer:", text);
+        AssertValue(normalized, "  volunteer  ", "  wage:", "none");
+        AssertValue(normalized, "  volunteer  ", "  capacity:", "0.5");
     }
 
     [Fact]
@@ -114,7 +123,7 @@ public sealed class ActorsScreenPrinterTests
 
         var text = ActorsScreenPrinter.FormatScreen(state, width: PanelLayout.DefaultWidth);
 
-        Assert.Contains("stats: none", text);
+        AssertValue(text.Replace("\r\n", "\n"), "  blank  ", "  stats:", "none");
     }
 
     [Fact]
@@ -139,5 +148,70 @@ public sealed class ActorsScreenPrinterTests
         var text = ActorsScreenPrinter.FormatScreen(state, width: 40);
         Assert.Contains("screen: actors", text);
         Assert.Equal(40, text.Replace("\r\n", "\n").Split('\n')[0].Length);
+    }
+
+    [Fact]
+    public void FormatScreen_ValueColumn_AlignsAcrossActorSubpanels()
+    {
+        var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors);
+        var normalized = ActorsScreenPrinter
+            .FormatScreen(state, width: PanelLayout.DefaultWidth)
+            .Replace("\r\n", "\n");
+
+        var internRow = RowAfterTitle(normalized, "  intern  ", "  capacity:");
+        var bossRow = RowAfterTitle(normalized, "  boss  ", "  capacity:");
+
+        Assert.Equal(
+            internRow.IndexOf(BoxDrawing.SingleVertical),
+            bossRow.IndexOf(BoxDrawing.SingleVertical));
+    }
+
+    [Fact]
+    public void FormatScreen_NumericValues_PadSoDigitsAlignByMagnitude()
+    {
+        var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors);
+        var normalized = ActorsScreenPrinter
+            .FormatScreen(state, width: PanelLayout.DefaultWidth)
+            .Replace("\r\n", "\n");
+
+        // Stats reach two digits, so single-digit values shift right by one to line up.
+        var enchanting = RawCell(RowAfterTitle(normalized, "  intern  ", "    enchanting:"), 1);
+        var capacity = RawCell(RowAfterTitle(normalized, "  intern  ", "  capacity:"), 1);
+
+        Assert.StartsWith("10", enchanting);
+        Assert.StartsWith(" 1", capacity);
+    }
+
+    /// <summary>Asserts the value cell of <paramref name="key"/> inside the panel titled <paramref name="title"/>.</summary>
+    private static void AssertValue(string normalized, string title, string key, string expectedValue) =>
+        Assert.Equal(expectedValue, Cell(RowAfterTitle(normalized, title, key), 1));
+
+    /// <summary>Column cell without trimming, so leading alignment padding stays visible.</summary>
+    private static string RawCell(string row, int index)
+    {
+        var cells = row.Split(BoxDrawing.SingleVertical);
+        Assert.True(cells.Length > index, $"Row has no column {index}: {row}");
+        return cells[index];
+    }
+
+    /// <summary>Finds the row whose key column holds <paramref name="key"/>, searching after the panel title.</summary>
+    private static string RowAfterTitle(string normalized, string title, string key)
+    {
+        var lines = normalized.Split('\n');
+        var start = Array.FindIndex(lines, l => l.Contains(title, StringComparison.Ordinal));
+        Assert.True(start >= 0, $"Missing subpanel title '{title}'.");
+
+        // Key cell keeps its indentation behind the border and the one-cell panel margin.
+        var expectedKeyCell = $"{BoxDrawing.DoubleVertical} {key}";
+        var row = Array.FindIndex(lines, start, l => Cell(l, 0).TrimEnd() == expectedKeyCell);
+        Assert.True(row >= 0, $"Missing row '{key}' after '{title}'.");
+        return lines[row];
+    }
+
+    private static string Cell(string row, int index)
+    {
+        var cells = row.Split(BoxDrawing.SingleVertical);
+        Assert.True(cells.Length > index, $"Row has no column {index}: {row}");
+        return index == 0 ? cells[0] : cells[index].Trim();
     }
 }

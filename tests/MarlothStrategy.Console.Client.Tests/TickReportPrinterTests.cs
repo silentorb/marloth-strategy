@@ -56,36 +56,37 @@ public sealed class TickReportPrinterTests
         Assert.Contains("month 1, week 1/4, day 1/7", text);
         Assert.Contains("screen: workflow", text);
         Assert.Contains("actors: boss, intern", text);
-        Assert.Contains("enchant:", text);
+        Assert.Contains("  enchant  ", text);
+        Assert.DoesNotContain("enchant:", text);
         Assert.Contains("intern 1", text);
         Assert.Contains("boss 1", text);
         Assert.Contains($"{BoxDrawing.SingleVertical}", text);
-        Assert.Contains("  enchantment:", text);
-        Assert.Contains($"    hash: {genesis.AbbreviatedHash}", text);
-        Assert.Contains("    volume: 0", text);
-        Assert.Contains("    designs: 0", text);
-        Assert.Contains("    darkness: 0", text);
-        Assert.Contains("    fallacy: 0", text);
-        Assert.Contains("  cycles: 0", text);
-        Assert.Contains("testing:", text);
+
+        // Nested enchantment leaves keep their indentation in the key column; values sit in their own cell.
+        AssertValue(normalized, "  enchant  ", "  enchantment:", string.Empty);
+        AssertValue(normalized, "  enchant  ", "    hash:", genesis.AbbreviatedHash);
+        AssertValue(normalized, "  enchant  ", "    volume:", "0");
+        AssertValue(normalized, "  enchant  ", "    designs:", "0");
+        AssertValue(normalized, "  enchant  ", "    darkness:", "0");
+        AssertValue(normalized, "  enchant  ", "    fallacy:", "0");
+        AssertValue(normalized, "  enchant  ", "  cycles:", "0");
+
+        Assert.Contains("  testing  ", text);
         Assert.DoesNotContain("merge:", text);
-        Assert.DoesNotContain("  primary: 0", text);
-        Assert.DoesNotContain("  secondary: 0", text);
-        Assert.Contains("payroll:", text);
+        Assert.DoesNotContain("  primary:", text);
+        Assert.DoesNotContain("  secondary:", text);
+        Assert.Contains("  payroll  ", text);
         Assert.DoesNotContain("  timer:", text);
         Assert.DoesNotContain("  progress:", text);
-        Assert.Contains("  money: 0", text);
-        Assert.Contains("sell:", text);
-        Assert.Contains("  enchantment: 0", text);
-        Assert.Contains("  money: 0", text);
-        Assert.Contains("treasury:", text);
-        Assert.Contains("  money: 100", text);
-        Assert.Contains($"{BoxDrawing.MixedTeeLeft}", text);
+        AssertValue(normalized, "  payroll  ", "  money:", "0");
+        AssertValue(normalized, "  sell  ", "  enchantment:", "0");
+        AssertValue(normalized, "  sell  ", "  money:", "0");
+        AssertValue(normalized, "  treasury  ", "  money:", "100");
+
+        Assert.Contains($"{BoxDrawing.DoubleTeeLeft}", text);
         Assert.Contains($"{BoxDrawing.DoubleBottomLeft}", text);
-        Assert.DoesNotContain("enchantment: -", text);
         Assert.DoesNotContain("Effort", text);
         Assert.DoesNotContain("Consumed", text);
-        Assert.DoesNotContain("volume: 0 \u2192", text);
     }
 
     [Fact]
@@ -100,9 +101,11 @@ public sealed class TickReportPrinterTests
         };
         var text = TickReportPrinter.FormatScreen(state, width: PanelLayout.DefaultWidth);
 
-        Assert.Contains("merge:", text);
-        Assert.Contains("  primary: 0", text);
-        Assert.Contains("  secondary: 0", text);
+        var normalized = text.Replace("\r\n", "\n");
+        Assert.Contains("  merge  ", text);
+        Assert.DoesNotContain("merge:", text);
+        AssertValue(normalized, "  merge  ", "  primary:", "0");
+        AssertValue(normalized, "  merge  ", "  secondary:", "0");
     }
 
     [Fact]
@@ -117,11 +120,14 @@ public sealed class TickReportPrinterTests
         var state = ScenarioBootstrap.Materialize(spec, DefaultConfigs, DefaultActors);
         var text = TickReportPrinter.FormatScreen(state, width: PanelLayout.DefaultWidth);
 
-        Assert.Contains("design:", text);
-        Assert.Contains("  enchantment:", text);
-        Assert.Contains("    designs: 0", text);
-        Assert.Contains("  cycles: 0", text);
+        var normalized = text.Replace("\r\n", "\n");
+        Assert.Contains("  design  ", text);
+        // Design's own port is empty; the nested leaves come from enchant's genesis block.
+        AssertValue(normalized, "  design  ", "  enchantment:", "0");
+        AssertValue(normalized, "  design  ", "  cycles:", "0");
+        AssertValue(normalized, "  enchant  ", "    designs:", "0");
         Assert.DoesNotContain("testing:", text);
+        Assert.DoesNotContain("  testing  ", text);
     }
 
     [Fact]
@@ -168,14 +174,12 @@ public sealed class TickReportPrinterTests
         Assert.Contains("Tick 1", normalized);
         Assert.Contains("month 1, week 1/4, day 2/7", normalized);
         Assert.Contains("actors: boss, intern", normalized);
-        Assert.Contains("volume: 0 \u2192 10", normalized);
-        Assert.Contains("cycles: 0 \u2192 1", normalized);
+        AssertValue(normalized, "  enchant  ", "    volume:", "0 \u2192 10");
+        AssertValue(normalized, "  enchant  ", "  cycles:", "0 \u2192 1");
         Assert.DoesNotContain("timer:", normalized);
         Assert.DoesNotContain("progress:", normalized);
-        Assert.Contains("treasury:", normalized);
-        Assert.Contains("  money: 100", normalized);
-        Assert.DoesNotContain("money: 100 \u2192 80", text);
-        Assert.DoesNotContain("money: 0 \u2192 80", text);
+        // Treasury money is owned stock, unchanged by this tick's transforms.
+        AssertValue(normalized, "  treasury  ", "  money:", "100");
         Assert.DoesNotContain("Effort", text);
         Assert.DoesNotContain("Consumed", text);
         Assert.Contains("hash:", normalized);
@@ -220,16 +224,20 @@ public sealed class TickReportPrinterTests
         var normalized = text.Replace("\r\n", "\n");
 
         Assert.Contains("actors: boss, intern \u2192 0", normalized);
-        Assert.Contains("money: 100 \u2192 80", normalized);
-        Assert.Contains("cycles: 0 \u2192 2", normalized);
-        Assert.Contains("volume: 0 \u2192 10", text);
-        Assert.Contains("designs: 0", text);
-        Assert.Contains("darkness: 0 \u2192 1", text);
-        Assert.Contains("fallacy: 0 \u2192 1", text);
-        Assert.Contains("cycles: 0 \u2192 1", text);
+        AssertValue(normalized, "  treasury  ", "  money:", "100 \u2192 80");
+        AssertValue(normalized, "  treasury  ", "  cycles:", "0 \u2192 2");
+        AssertValue(normalized, "  enchant  ", "    volume:", "0 \u2192 10");
+        AssertValue(normalized, "  enchant  ", "    designs:", "0");
+        AssertValue(normalized, "  enchant  ", "    darkness:", "0 \u2192 1");
+        AssertValue(normalized, "  enchant  ", "    fallacy:", "0 \u2192 1");
+        AssertValue(normalized, "  enchant  ", "  cycles:", "0 \u2192 1");
         Assert.DoesNotContain("timer:", normalized);
         Assert.DoesNotContain("progress:", normalized);
-        Assert.Contains($"hash: {EnchantmentBlock.CreateGenesis().AbbreviatedHash} \u2192 {block.AbbreviatedHash}", text);
+        AssertValue(
+            normalized,
+            "  enchant  ",
+            "    hash:",
+            $"{EnchantmentBlock.CreateGenesis().AbbreviatedHash} \u2192 {block.AbbreviatedHash}");
     }
 
     [Fact]
@@ -255,16 +263,15 @@ public sealed class TickReportPrinterTests
         var normalized = text.Replace("\r\n", "\n");
 
         Assert.Contains(DeltaCaptionInPanel(), normalized);
-        Assert.Contains("+9", normalized);
-        Assert.Contains("money: 100 \u2192 109", normalized);
-        Assert.Contains("cycles: 0 \u2192 1", normalized);
-        // Three columns: state | Δ | assignments separated by single verticals inside left subpanels.
-        Assert.Contains($"{BoxDrawing.SingleVertical}", normalized);
-        var treasuryLine = normalized.Split('\n').First(l => l.Contains("money: 100 \u2192 109"));
-        Assert.Contains("+9", treasuryLine);
+        AssertValue(normalized, "  treasury  ", "  money:", "100 \u2192 109");
+        AssertValue(normalized, "  enchant  ", "  cycles:", "0 \u2192 1");
+
+        // Four columns: name | value | Δ | assignments, separated by single verticals.
+        var treasuryLine = RowAfterTitle(normalized, "  treasury  ", "  money:");
+        Assert.Equal("+9", Cell(treasuryLine, 2));
         Assert.True(
-            treasuryLine.Count(c => c == BoxDrawing.SingleVertical) >= 2,
-            $"Expected at least two column separators on treasury money row: {treasuryLine}");
+            treasuryLine.Count(c => c == BoxDrawing.SingleVertical) >= 3,
+            $"Expected at least three column separators on treasury money row: {treasuryLine}");
     }
 
     [Fact]
@@ -289,21 +296,94 @@ public sealed class TickReportPrinterTests
             width: PanelLayout.DefaultWidth,
             baseline: baseline);
         var normalized = text.Replace("\r\n", "\n");
-        var lines = normalized.Split('\n');
 
-        var payrollLine = MoneyRowAfter(lines, $"{MagicAgencySeed.PayrollNodeId.Value}:");
-        Assert.Contains("-15", payrollLine);
-        var sellLine = MoneyRowAfter(lines, $"{MagicAgencySeed.SellNodeId.Value}:");
-        Assert.Contains("+24", sellLine);
+        var payrollLine = RowAfterTitle(normalized, $"  {MagicAgencySeed.PayrollNodeId.Value}  ", "  money:");
+        Assert.Equal("-15", Cell(payrollLine, 2));
+        var sellLine = RowAfterTitle(normalized, $"  {MagicAgencySeed.SellNodeId.Value}  ", "  money:");
+        Assert.Equal("+24", Cell(sellLine, 2));
     }
 
-    private static string MoneyRowAfter(string[] lines, string subpanelHeader)
+    [Fact]
+    public void FormatScreen_NumericCells_PadSoDigitsAlignByMagnitude()
     {
-        var start = Array.FindIndex(lines, l => l.Contains(subpanelHeader, StringComparison.Ordinal));
-        Assert.True(start >= 0, $"Missing subpanel header '{subpanelHeader}'.");
-        var row = Array.FindIndex(lines, start, l => l.Contains("money:", StringComparison.Ordinal));
-        Assert.True(row >= 0, $"Missing money row after '{subpanelHeader}'.");
+        var baseline = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors);
+        var current = baseline with
+        {
+            Tick = 2,
+            PortSignals = baseline.PortSignals
+                .SetItem(
+                    new PortKey(MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId),
+                    new SignalValue.Money(109)),
+        };
+
+        var normalized = TickReportPrinter
+            .FormatScreen(current, previous: baseline, width: PanelLayout.DefaultWidth, baseline: baseline)
+            .Replace("\r\n", "\n")
+            .Replace("\r\n", "\n");
+
+        // treasury money is three digits, payroll money one — the shorter value shifts right to line up.
+        var treasury = RowAfterTitle(normalized, "  treasury  ", "  money:");
+        var payroll = RowAfterTitle(normalized, "  payroll  ", "  money:");
+        Assert.StartsWith("100", RawCell(treasury, 1));
+        Assert.StartsWith("  0", RawCell(payroll, 1));
+
+        // Same for the signed Δ column (+9 against a single-digit 0).
+        Assert.StartsWith("+9", RawCell(treasury, 2));
+        Assert.StartsWith(" 0", RawCell(payroll, 2));
+    }
+
+    [Fact]
+    public void FormatScreen_NonNumericCells_StayFlushLeft()
+    {
+        var baseline = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors);
+        var current = baseline with
+        {
+            Tick = 2,
+            PortSignals = baseline.PortSignals.SetItem(
+                new PortKey(MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId),
+                new SignalValue.Money(109)),
+        };
+
+        var normalized = TickReportPrinter
+            .FormatScreen(current, previous: baseline, width: PanelLayout.DefaultWidth, baseline: baseline)
+            .Replace("\r\n", "\n");
+
+        // A hash is not a number, so it is not shifted by the money column's magnitude.
+        var hash = RawCell(RowAfterTitle(normalized, "  enchant  ", "    hash:"), 1);
+        Assert.StartsWith(EnchantmentBlock.CreateGenesis().AbbreviatedHash, hash);
+    }
+
+    /// <summary>Asserts the value cell of <paramref name="key"/> inside the panel titled <paramref name="title"/>.</summary>
+    private static void AssertValue(string normalized, string title, string key, string expectedValue) =>
+        Assert.Equal(expectedValue, Cell(RowAfterTitle(normalized, title, key), 1));
+
+    /// <summary>Column cell without trimming, so leading alignment padding stays visible.</summary>
+    private static string RawCell(string row, int index)
+    {
+        var cells = row.Split(BoxDrawing.SingleVertical);
+        Assert.True(cells.Length > index, $"Row has no column {index}: {row}");
+        return cells[index];
+    }
+
+    /// <summary>Finds the row whose key column holds <paramref name="key"/>, searching after the panel title.</summary>
+    private static string RowAfterTitle(string normalized, string title, string key)
+    {
+        var lines = normalized.Split('\n');
+        var start = Array.FindIndex(lines, l => l.Contains(title, StringComparison.Ordinal));
+        Assert.True(start >= 0, $"Missing subpanel title '{title}'.");
+
+        // Key cell keeps its indentation behind the border and the one-cell panel margin.
+        var expectedKeyCell = $"{BoxDrawing.DoubleVertical} {key}";
+        var row = Array.FindIndex(lines, start, l => Cell(l, 0).TrimEnd() == expectedKeyCell);
+        Assert.True(row >= 0, $"Missing row '{key}' after '{title}'.");
         return lines[row];
+    }
+
+    private static string Cell(string row, int index)
+    {
+        var cells = row.Split(BoxDrawing.SingleVertical);
+        Assert.True(cells.Length > index, $"Row has no column {index}: {row}");
+        return index == 0 ? cells[0] : cells[index].Trim();
     }
 
     private static string DeltaCaptionInPanel() => "\u0394";
