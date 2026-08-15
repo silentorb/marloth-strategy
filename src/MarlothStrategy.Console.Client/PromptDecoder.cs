@@ -2,8 +2,9 @@ namespace MarlothStrategy.Console.Client;
 
 public enum PromptAction
 {
-    AdvanceTick,
-    AdvanceMacro,
+    AdvanceStep,
+    DecreaseStepResolution,
+    IncreaseStepResolution,
     NewGame,
     Quit,
     Unknown,
@@ -24,7 +25,7 @@ public static class PromptDecoder
         var trimmed = line.Trim();
         if (trimmed.Length == 0)
         {
-            return PromptAction.AdvanceTick;
+            return PromptAction.AdvanceStep;
         }
 
         if (trimmed.Equals("q", StringComparison.OrdinalIgnoreCase))
@@ -37,9 +38,14 @@ public static class PromptDecoder
             return PromptAction.NewGame;
         }
 
-        if (trimmed.Equals("space", StringComparison.OrdinalIgnoreCase))
+        if (trimmed == "-")
         {
-            return PromptAction.AdvanceMacro;
+            return PromptAction.DecreaseStepResolution;
+        }
+
+        if (trimmed is "+" or "=")
+        {
+            return PromptAction.IncreaseStepResolution;
         }
 
         return PromptAction.Unknown;
@@ -49,12 +55,19 @@ public static class PromptDecoder
     {
         if (key.Key == ConsoleKey.Enter)
         {
-            return PromptAction.AdvanceTick;
+            return PromptAction.AdvanceStep;
         }
 
-        if (key.Key == ConsoleKey.Spacebar || key.KeyChar == ' ')
+        if (key.KeyChar == '-')
         {
-            return PromptAction.AdvanceMacro;
+            return PromptAction.DecreaseStepResolution;
+        }
+
+        // Unshifted '=' shares the '+' keycap on common US layouts; also accept
+        // shifted '+' and numpad Add so players never need Shift for coarser steps.
+        if (key.KeyChar is '+' or '=' || key.Key == ConsoleKey.Add)
+        {
+            return PromptAction.IncreaseStepResolution;
         }
 
         if (key.KeyChar is 'q' or 'Q')

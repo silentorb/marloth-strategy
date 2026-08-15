@@ -45,7 +45,7 @@ public sealed class TimePartitionProgressionTests
     public void AdvanceTicks_MatchesRepeatedAdvanceTick()
     {
         var start = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors);
-        Assert.Equal(7, start.TimePartitions.AdvanceTickCount);
+        Assert.Equal(7, start.TimePartitions.DefaultStepTickCount);
 
         var single = start;
         for (var i = 0; i < 7; i++)
@@ -66,7 +66,7 @@ public sealed class TimePartitionProgressionTests
         var midWeek = ProductionTick.AdvanceTicks(start, 3);
         Assert.Equal(3, midWeek.Tick);
 
-        var afterMacro = ProductionTick.AdvanceTicks(midWeek, midWeek.TimePartitions.AdvanceTickCount);
+        var afterMacro = ProductionTick.AdvanceTicks(midWeek, midWeek.TimePartitions.DefaultStepTickCount);
         Assert.Equal(10, afterMacro.Tick);
 
         var positions = afterMacro.TimePartitions.PositionsAt(afterMacro.Tick);
@@ -101,8 +101,8 @@ public sealed class TimePartitionProgressionTests
     public void Bootstrap_AttachesCommittedTimePartitions()
     {
         var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors);
-        Assert.Equal("week", state.TimePartitions.AdvanceUnit);
-        Assert.Equal(7, state.TimePartitions.AdvanceTickCount);
+        Assert.Equal("week", state.TimePartitions.DefaultStepResolution);
+        Assert.Equal(7, state.TimePartitions.DefaultStepTickCount);
     }
 
     /// <summary>

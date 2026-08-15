@@ -55,18 +55,13 @@ public static class TimePartitionConfigLoader
                 $"Time partition config '{path}' must declare at least one unit.");
         }
 
-        if (string.IsNullOrWhiteSpace(dto.AdvanceUnit))
+        if (string.IsNullOrWhiteSpace(dto.DefaultStepResolution))
         {
             throw new InvalidOperationException(
-                $"Time partition config '{path}' must declare advanceUnit.");
+                $"Time partition config '{path}' must declare defaultStepResolution.");
         }
 
-        var advanceUnit = dto.AdvanceUnit.Trim();
-        if (advanceUnit.Equals(TimePartitionConfig.TickUnitName, StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(
-                $"Time partition config '{path}' advanceUnit must not be '{TimePartitionConfig.TickUnitName}'.");
-        }
+        var defaultStepResolution = dto.DefaultStepResolution.Trim();
 
         var units = new List<TimePartitionUnit>(dto.Units.Count);
         var seenNames = new HashSet<string>(StringComparer.Ordinal);
@@ -208,13 +203,16 @@ public static class TimePartitionConfigLoader
                 $"Time partition config '{path}' unit '{missing}' is not on the single chain from '{TimePartitionConfig.TickUnitName}'.");
         }
 
-        if (!ticksPerUnit.ContainsKey(advanceUnit))
+        if (!ticksPerUnit.ContainsKey(defaultStepResolution))
         {
             throw new InvalidOperationException(
-                $"Time partition config '{path}' advanceUnit '{advanceUnit}' is not a declared unit.");
+                $"Time partition config '{path}' defaultStepResolution '{defaultStepResolution}' is not '{TimePartitionConfig.TickUnitName}' or a declared unit.");
         }
 
-        return new TimePartitionConfig(ordered.MoveToImmutable(), advanceUnit, ticksPerUnit.ToImmutable());
+        return new TimePartitionConfig(
+            ordered.MoveToImmutable(),
+            defaultStepResolution,
+            ticksPerUnit.ToImmutable());
     }
 
     private sealed class TimePartitionsDto
@@ -223,7 +221,7 @@ public static class TimePartitionConfigLoader
         public List<TimePartitionUnitDto?>? Units { get; init; }
 
         [JsonRequired]
-        public string? AdvanceUnit { get; init; }
+        public string? DefaultStepResolution { get; init; }
     }
 
     private sealed class TimePartitionUnitDto

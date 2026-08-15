@@ -172,13 +172,13 @@ Nested calendar labels over the monotonic `Tick` counter. Configured in `config/
     { "name": "week", "contains": 7, "of": "day" },
     { "name": "month", "contains": 4, "of": "week" }
   ],
-  "advanceUnit": "week"
+  "defaultStepResolution": "week"
 }
 ```
 
-Validation (fail-fast): positive `contains`; unique unit names; no unit named `tick`; exactly one connected acyclic chain rooted at `of: "tick"`; `advanceUnit` is a declared non-`tick` unit; tick-duration products must fit in `int`.
+Validation (fail-fast): positive `contains`; unique unit names; no unit named `tick`; exactly one connected acyclic chain rooted at `of: "tick"`; `defaultStepResolution` is `tick` or a declared unit; tick-duration products must fit in `int`.
 
-Seed defaults: 1 tick = 1 day; 7 days = 1 week; 4 weeks = 1 month; session macro advance uses **week** (7 ticks).
+Seed defaults: 1 tick = 1 day; 7 days = 1 week; 4 weeks = 1 month; default session step resolution is **week** (7 ticks). Ordered step resolutions: `tick`, then each configured unit (`day` → `week` → `month`).
 
 ### Positions and rollover
 
@@ -190,14 +190,14 @@ Seed defaults: 1 tick = 1 day; 7 days = 1 week; 4 weeks = 1 month; session macro
 
 `AbsoluteIndex(unit, tick)` is `tick / TicksPer(unit)` (zero-based). `PositionWithin(childUnit, parentUnit, tick)` is the one-based index of the child inside the parent at that tick. Payroll’s schedule uses these helpers (not a raw tick countdown).
 
-### Macro advance
+### Multi-tick advance
 
 ```csharp
 GameState AdvanceTicks(GameState state, int tickCount);
 ProductionTickResult AdvanceTicksWithReport(GameState state, int tickCount);
 ```
 
-Composes the ordinary tick pipeline exactly `tickCount` times (`tickCount > 0`). Session Space uses `state.TimePartitions.AdvanceTickCount` (duration of `advanceUnit`), advancing that many ticks **from the current tick** — not snapping to the next boundary.
+Composes the ordinary tick pipeline exactly `tickCount` times (`tickCount > 0`). Session Enter uses `TicksPer(stepResolution)` for the player's selected resolution (default from `defaultStepResolution`), advancing that many ticks **from the current tick** — not snapping to the next boundary.
 
 ## Tick pipeline
 
@@ -255,7 +255,7 @@ Under `src/MarlothStrategy.Simulation/`:
 - `config/node-types/` — JSON behavior numerics per node type (copied to output)
 - `config/actors/` — JSON actor definitions (copied to output)
 - `config/scenarios/` — named presets (`lab01.json`) and `actor-pool.json` (copied to output)
-- `config/time-partitions.json` — nested calendar hierarchy and session `advanceUnit` (copied to output)
+- `config/time-partitions.json` — nested calendar hierarchy and session `defaultStepResolution` (copied to output)
 
 ## Error handling
 

@@ -11,20 +11,35 @@
 - Adding IDE play launch configuration for the console App
 - Changing box-drawing / panel layout helpers
 - Adding or changing optional play-only dotenv / `.env` overrides on the App host (`SCENARIO_PRESET`, `SCENARIO_SEED`)
+- Changing persistent player preferences under untracked `./config/user.json` (step resolution)
 - Changing calendar header formatting derived from time partitions
 
 ## Host and session
 
 - Before constructing `GameConfig`, App loads an optional repo `.env` via DotNetEnv (`NoClobber` + `TraversePath`). Missing file is a no-op; unset keys must keep **production** play behavior. Shell-set env vars win over file values. Play-only developer tweaks — not used by tests (App is not on the test graph). See [`.env.example`](../../../../.env.example).
-- App reads `SCENARIO_PRESET` (optional name; whitespace/empty → unset → random scenario) and `SCENARIO_SEED` (optional integer; unset → `Random.Shared.Next()`; invalid → fail-fast at the abort boundary) into `GameConfig`, then calls `ConsoleClient.Run(config)`.
+- App reads `SCENARIO_PRESET` (optional name; whitespace/empty → unset → random scenario) and `SCENARIO_SEED` (optional integer; unset → `Random.Shared.Next()`; invalid → fail-fast at the abort boundary) into `GameConfig`, then calls `ConsoleClient.Run(config, userConfigPath)` with `./config/user.json` relative to the process working directory.
 - Prefer a **single abort boundary** at process entry for fatal/unrecoverable errors ([error handling](../platform/error-handling.md)); do not scatter catches in Client.
-- Client boots with `ScenarioBootstrap.CreateInitialState(config)`, clears the screen, prints the tick-0 panel screen, then loops until quit/EOF ([console loop](../../../game/features/session/console-loop.md)).
-- On Enter: capture prior state, `AdvanceTicksWithReport(state, 1)`, then clear and print `FormatScreen(state, previous, result, …, baseline: tick0)` so change arrows use committed stocks (and cycles / actors) and the Δ column uses tick-0 baselines.
-- On Space: same path with `tickCount = state.TimePartitions.AdvanceTickCount` (seed: 7). Change arrows compare pre-macro state to post-macro state (one summary for the whole interval). The last tick's `ProductionTickResult` is passed through for API symmetry; the Client does not print per-node I/O rows.
-- On `n` / `N`: create a fresh initial state from the session's existing `GameConfig`, replace the tick-0 baseline, and redraw the tick-0 screen. A seeded random scenario therefore restarts deterministically rather than choosing a new seed.
-- Interactive input uses `Console.ReadKey(intercept: true)` so **Enter**, **Space**, **`n`/`N`**, and **`q`/`Q`** are single keypresses. When `Console.IsInputRedirected`, fall back to `ReadLine` (empty line / `space` / `n` / `q`) for agent piped smoke. Decoding lives in `PromptDecoder`.
+- Client boots with `ScenarioBootstrap.CreateInitialState(config)`, loads `UserConfig` from the supplied path (missing file → `TimePartitions.DefaultStepResolution` without creating a file; invalid JSON / unknown members / unavailable `stepResolution` → `InvalidOperationException` with path), clears the screen, prints the tick-0 panel screen, then loops until quit/EOF ([console loop](../../../game/features/session/console-loop.md)).
+- On Enter: capture prior state, `AdvanceTicksWithReport(state, TicksPer(stepResolution))`, then clear and print `FormatScreen(state, previous, result, …, baseline: tick0)` so change arrows use committed stocks (and cycles / actors) and the Δ column uses tick-0 baselines. Multi-tick steps compare pre-step state to post-step state (one summary for the whole interval). The last tick's `ProductionTickResult` is passed through for API symmetry; the Client does not print per-node I/O rows.
+- On `-` / `+` (`=` unshifted, `+` shifted, or numpad Add): move one step finer/coarser along `TimePartitions.StepResolutions` (`tick` then configured units). Endpoint presses are no-ops. On a real change, **save** `user.json` first (create `config/` as needed; atomic temp+replace), then update the in-memory selection and redraw without advancing time. Write failures abort through the App boundary so interactive selection cannot diverge from a failed persist.
+- On `n` / `N`: create a fresh initial state from the session's existing `GameConfig`, replace the tick-0 baseline, and redraw the tick-0 screen while keeping the selected step resolution. A seeded random scenario therefore restarts deterministically rather than choosing a new seed.
+- Interactive input uses `Console.ReadKey(intercept: true)` so **Enter**, **`-`**, **`=`/`+`**, **`n`/`N`**, and **`q`/`Q`** are single keypresses. When `Console.IsInputRedirected`, fall back to `ReadLine` (empty line / `-` / `+` / `=` / `n` / `q`) for agent piped smoke. Decoding lives in `PromptDecoder`.
 - Invalid prompt input clears, redraws the current screen, prints a short hint, and re-prompts. Expected player mistakes are not exceptions.
-- The prompt sits **below** the framed report (not inside a panel). Prompt text names the configured advance unit (e.g. `Space = next week`).
+- The prompt sits **below** the framed report (not inside a panel). Prompt text names the current step resolution (e.g. `Enter = next week, - = finer, + (= key) = coarser`).
+
+## Persistent user config
+
+- Path: `./config/user.json` under the process working directory (repo-root when launched from the solution). Gitignored via `/config/` so committed Simulation `config/` stays tracked.
+- Schema (camelCase, indented on write):
+
+```json
+{
+  "stepResolution": "week"
+}
+```
+
+- Read options match Simulation loaders (case-insensitive properties, comments/trailing commas allowed, unknown members disallowed). Missing file is an expected default; corrupt or invalid values fail fast with the path in the message.
+- Ownership: `UserConfigStore` in Console.Client; App supplies the path. Do not load this from `AppContext.BaseDirectory/config` (that tree is committed game data).
 
 ## Screen redraw
 

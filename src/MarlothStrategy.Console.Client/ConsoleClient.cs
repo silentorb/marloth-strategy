@@ -5,19 +5,24 @@ namespace MarlothStrategy.Console.Client;
 
 public static class ConsoleClient
 {
-    public static void Run(GameConfig config)
+    public static void Run(GameConfig config) =>
+        Run(config, UserConfigStore.DefaultPath);
+
+    public static void Run(GameConfig config, string userConfigPath)
     {
         ArgumentNullException.ThrowIfNull(config);
+        ArgumentException.ThrowIfNullOrWhiteSpace(userConfigPath);
 
         var state = ScenarioBootstrap.CreateInitialState(config);
         var baseline = state;
-        var advanceLabel = state.TimePartitions.AdvanceUnit;
+        var userConfig = UserConfigStore.LoadOrDefault(userConfigPath, state.TimePartitions);
+        var stepResolution = userConfig.StepResolution;
         DrawReport(state, config, baseline);
 
         while (true)
         {
             System.Console.Write(
-                $"Enter = next tick, Space = next {advanceLabel}, n = new game, q = quit> ");
+                $"Enter = next {stepResolution}, - = finer, + (= key) = coarser, n = new game, q = quit> ");
             switch (ReadPromptAction())
             {
                 case PromptAction.Quit:
@@ -27,26 +32,50 @@ public static class ConsoleClient
                 case PromptAction.Unknown:
                     DrawReport(state, config, baseline);
                     System.Console.WriteLine(
-                        $"Unknown input. Press Enter for next tick, Space for next {advanceLabel}, n for a new game, or q to quit.");
+                        $"Unknown input. Press Enter for next {stepResolution}, - for finer, + (= key) for coarser, n for a new game, or q to quit.");
                     continue;
                 case PromptAction.NewGame:
                     state = ScenarioBootstrap.CreateInitialState(config);
                     baseline = state;
-                    advanceLabel = state.TimePartitions.AdvanceUnit;
                     DrawReport(state, config, baseline);
                     break;
-                case PromptAction.AdvanceTick:
-                    AdvanceAndDraw(ref state, config, baseline, tickCount: 1);
-                    break;
-                case PromptAction.AdvanceMacro:
+                case PromptAction.AdvanceStep:
                     AdvanceAndDraw(
                         ref state,
                         config,
                         baseline,
-                        tickCount: state.TimePartitions.AdvanceTickCount);
+                        tickCount: state.TimePartitions.TicksPer(stepResolution));
+                    break;
+                case PromptAction.DecreaseStepResolution:
+                    if (state.TimePartitions.TryGetFinerStepResolution(stepResolution, out var finer))
+                    {
+                        SaveStepResolution(userConfigPath, state, finer);
+                        stepResolution = finer;
+                    }
+
+                    DrawReport(state, config, baseline);
+                    break;
+                case PromptAction.IncreaseStepResolution:
+                    if (state.TimePartitions.TryGetCoarserStepResolution(stepResolution, out var coarser))
+                    {
+                        SaveStepResolution(userConfigPath, state, coarser);
+                        stepResolution = coarser;
+                    }
+
+                    DrawReport(state, config, baseline);
                     break;
             }
         }
+    }
+
+    private static void SaveStepResolution(string userConfigPath, GameState state, string stepResolution)
+    {
+        // Persist before mutating session selection so a failed write cannot leave
+        // interactive state half-updated relative to disk.
+        UserConfigStore.Save(
+            userConfigPath,
+            new UserConfig(stepResolution),
+            state.TimePartitions);
     }
 
     private static void AdvanceAndDraw(
@@ -106,8 +135,8 @@ public static class ConsoleClient
     }
 
     /// <summary>
-    /// Interactive terminals use single-key <see cref="System.Console.ReadKey"/> (Enter / Space / n / q).
-    /// Redirected stdin (agent smoke) falls back to line mode.
+    /// Interactive terminals use single-key <see cref="System.Console.ReadKey"/>
+    /// (Enter / - / =|+ / n / q). Redirected stdin (agent smoke) falls back to line mode.
     /// </summary>
     private static PromptAction ReadPromptAction()
     {

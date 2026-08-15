@@ -20,11 +20,12 @@ public sealed class TimePartitionConfigTests
         Assert.Equal("month", config.Units[2].Name);
         Assert.Equal(4, config.Units[2].Contains);
         Assert.Equal("week", config.Units[2].Of);
-        Assert.Equal("week", config.AdvanceUnit);
+        Assert.Equal("week", config.DefaultStepResolution);
         Assert.Equal(1, config.TicksPer("day"));
         Assert.Equal(7, config.TicksPer("week"));
         Assert.Equal(28, config.TicksPer("month"));
-        Assert.Equal(7, config.AdvanceTickCount);
+        Assert.Equal(7, config.DefaultStepTickCount);
+        Assert.Equal(new[] { "tick", "day", "week", "month" }, config.StepResolutions.ToArray());
     }
 
     [Fact]
@@ -124,7 +125,7 @@ public sealed class TimePartitionConfigTests
                 { "name": "bar", "contains": 4, "of": "beat" },
                 { "name": "phrase", "contains": 3, "of": "bar" }
               ],
-              "advanceUnit": "bar"
+              "defaultStepResolution": "bar"
             }
             """);
 
@@ -132,7 +133,43 @@ public sealed class TimePartitionConfigTests
         Assert.Equal(2, config.TicksPer("beat"));
         Assert.Equal(8, config.TicksPer("bar"));
         Assert.Equal(24, config.TicksPer("phrase"));
-        Assert.Equal(8, config.AdvanceTickCount);
+        Assert.Equal(8, config.DefaultStepTickCount);
+    }
+
+    [Fact]
+    public void Loader_DefaultStepResolutionTick_IsAllowed()
+    {
+        var path = WriteTempConfig(
+            """
+            {
+              "units": [
+                { "name": "day", "contains": 1, "of": "tick" }
+              ],
+              "defaultStepResolution": "tick"
+            }
+            """);
+
+        var config = TimePartitionConfigLoader.LoadFromFile(path);
+        Assert.Equal("tick", config.DefaultStepResolution);
+        Assert.Equal(1, config.DefaultStepTickCount);
+        Assert.Equal(new[] { "tick", "day" }, config.StepResolutions.ToArray());
+    }
+
+    [Fact]
+    public void TryGetFinerAndCoarser_NavigateStepResolutions()
+    {
+        var config = TimePartitionConfigLoader.LoadFromBaseDirectory();
+
+        Assert.False(config.TryGetFinerStepResolution("tick", out var stillTick));
+        Assert.Equal("tick", stillTick);
+        Assert.True(config.TryGetCoarserStepResolution("tick", out var day));
+        Assert.Equal("day", day);
+        Assert.True(config.TryGetFinerStepResolution("week", out var finer));
+        Assert.Equal("day", finer);
+        Assert.True(config.TryGetCoarserStepResolution("week", out var coarser));
+        Assert.Equal("month", coarser);
+        Assert.False(config.TryGetCoarserStepResolution("month", out var stillMonth));
+        Assert.Equal("month", stillMonth);
     }
 
     [Theory]
@@ -142,7 +179,7 @@ public sealed class TimePartitionConfigTests
           "units": [
             { "name": "day", "contains": 0, "of": "tick" }
           ],
-          "advanceUnit": "day"
+          "defaultStepResolution": "day"
         }
         """)]
     [InlineData(
@@ -152,7 +189,7 @@ public sealed class TimePartitionConfigTests
             { "name": "day", "contains": 1, "of": "tick" },
             { "name": "day", "contains": 7, "of": "day" }
           ],
-          "advanceUnit": "day"
+          "defaultStepResolution": "day"
         }
         """)]
     [InlineData(
@@ -161,7 +198,7 @@ public sealed class TimePartitionConfigTests
           "units": [
             { "name": "week", "contains": 7, "of": "day" }
           ],
-          "advanceUnit": "week"
+          "defaultStepResolution": "week"
         }
         """)]
     [InlineData(
@@ -172,7 +209,7 @@ public sealed class TimePartitionConfigTests
             { "name": "week", "contains": 7, "of": "day" },
             { "name": "alt", "contains": 2, "of": "day" }
           ],
-          "advanceUnit": "week"
+          "defaultStepResolution": "week"
         }
         """)]
     [InlineData(
@@ -181,16 +218,7 @@ public sealed class TimePartitionConfigTests
           "units": [
             { "name": "day", "contains": 1, "of": "tick" }
           ],
-          "advanceUnit": "tick"
-        }
-        """)]
-    [InlineData(
-        """
-        {
-          "units": [
-            { "name": "day", "contains": 1, "of": "tick" }
-          ],
-          "advanceUnit": "missing"
+          "defaultStepResolution": "missing"
         }
         """)]
     public void Loader_InvalidHierarchy_FailsFast(string json)

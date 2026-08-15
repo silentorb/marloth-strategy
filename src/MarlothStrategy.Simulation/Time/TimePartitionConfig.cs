@@ -22,25 +22,41 @@ public sealed class TimePartitionConfig : IEquatable<TimePartitionConfig>
     public ImmutableArray<TimePartitionUnit> Units { get; }
 
     /// <summary>
-    /// Named unit used for session macro advance (e.g. Space). Must not be <see cref="TickUnitName"/>.
+    /// Default session step resolution when no user preference is stored.
+    /// May be <see cref="TickUnitName"/> or any declared unit.
     /// </summary>
-    public string AdvanceUnit { get; }
+    public string DefaultStepResolution { get; }
 
     /// <summary>
     /// Tick duration of each named unit, including <see cref="TickUnitName"/> = 1.
     /// </summary>
     public ImmutableDictionary<string, int> TicksPerUnit { get; }
 
-    public int AdvanceTickCount => TicksPerUnit[AdvanceUnit];
+    /// <summary>
+    /// Ordered step resolutions from finest to coarsest:
+    /// <see cref="TickUnitName"/> then each configured unit.
+    /// </summary>
+    public ImmutableArray<string> StepResolutions { get; }
+
+    public int DefaultStepTickCount => TicksPerUnit[DefaultStepResolution];
 
     internal TimePartitionConfig(
         ImmutableArray<TimePartitionUnit> units,
-        string advanceUnit,
+        string defaultStepResolution,
         ImmutableDictionary<string, int> ticksPerUnit)
     {
         Units = units;
-        AdvanceUnit = advanceUnit;
+        DefaultStepResolution = defaultStepResolution;
         TicksPerUnit = ticksPerUnit;
+
+        var resolutions = ImmutableArray.CreateBuilder<string>(units.Length + 1);
+        resolutions.Add(TickUnitName);
+        foreach (var unit in units)
+        {
+            resolutions.Add(unit.Name);
+        }
+
+        StepResolutions = resolutions.MoveToImmutable();
     }
 
     /// <summary>
@@ -168,6 +184,34 @@ public sealed class TimePartitionConfig : IEquatable<TimePartitionConfig>
         return ticks;
     }
 
+    public bool TryGetFinerStepResolution(string current, out string finer)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(current);
+        var index = StepResolutions.IndexOf(current);
+        if (index <= 0)
+        {
+            finer = current;
+            return false;
+        }
+
+        finer = StepResolutions[index - 1];
+        return true;
+    }
+
+    public bool TryGetCoarserStepResolution(string current, out string coarser)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(current);
+        var index = StepResolutions.IndexOf(current);
+        if (index < 0 || index >= StepResolutions.Length - 1)
+        {
+            coarser = current;
+            return false;
+        }
+
+        coarser = StepResolutions[index + 1];
+        return true;
+    }
+
     public bool Equals(TimePartitionConfig? other)
     {
         if (other is null)
@@ -180,7 +224,7 @@ public sealed class TimePartitionConfig : IEquatable<TimePartitionConfig>
             return true;
         }
 
-        return AdvanceUnit == other.AdvanceUnit
+        return DefaultStepResolution == other.DefaultStepResolution
             && Units.SequenceEqual(other.Units)
             && TicksPerUnit.Count == other.TicksPerUnit.Count
             && TicksPerUnit.All(kv =>
@@ -192,7 +236,7 @@ public sealed class TimePartitionConfig : IEquatable<TimePartitionConfig>
     public override int GetHashCode()
     {
         var hash = new HashCode();
-        hash.Add(AdvanceUnit, StringComparer.Ordinal);
+        hash.Add(DefaultStepResolution, StringComparer.Ordinal);
         foreach (var unit in Units)
         {
             hash.Add(unit);

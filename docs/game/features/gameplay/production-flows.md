@@ -58,7 +58,7 @@ Do not use “man/manning” in product language; use **assignment** / **assigne
 
 ## Circular flows and ticks
 
-- Production updates run in discrete **ticks**. One player turn can advance **one tick** (Enter) or one configured **macro** unit of nested time (Space; seed default = one **week** = 7 ticks). See [console loop](../session/console-loop.md).
+- Production updates run in discrete **ticks**. One player turn advances by the currently selected **step resolution** (Enter; seed default = one **week** = 7 ticks). Players change resolution with `-` (finer) and `+` / `=` (coarser) across `tick` and the configured calendar units. See [console loop](../session/console-loop.md).
 - Nested time partitions label the tick counter (seed: day / week / month). Payroll’s open/due window is derived from those labels via its configurable schedule.
 - Enchantment uses **buffered** cross-tick signals (outputs visible next tick). Sell payouts enqueue treasury inbound on commit; payroll payday enqueues outbound when its application completes (routing declared by `treasury.money` → `payroll.money`). Treasury applies only moves already pending at the start of the tick (no same-tick money chain); successful outs emit money along outgoing edges. Because of that one-tick lag, a payroll request completed on the due day is not received until a later tick and is therefore late.
 - Information ports hold a single combined value after commit. Multiple routed copies (and a residual) **`+` together**; conflict empties the port.

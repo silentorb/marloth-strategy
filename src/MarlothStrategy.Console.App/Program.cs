@@ -9,7 +9,7 @@ try
     Env.NoClobber().TraversePath().Load();
 
     var config = ReadGameConfig();
-    ConsoleClient.Run(config);
+    ConsoleClient.Run(config, UserConfigStore.DefaultPath);
 }
 catch (Exception ex)
 {
