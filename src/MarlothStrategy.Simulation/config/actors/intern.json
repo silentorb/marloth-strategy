@@ -1,6 +1,7 @@
 {
   "id": "intern",
   "capacity": 1.0,
+  "wage": 2,
   "stats": {
     "enchanting": 10,
     "sales": 10

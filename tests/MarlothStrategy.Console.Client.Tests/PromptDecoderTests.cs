@@ -10,6 +10,8 @@ public sealed class PromptDecoderTests
     [InlineData("   ", PromptAction.AdvanceTick)]
     [InlineData("q", PromptAction.Quit)]
     [InlineData("Q", PromptAction.Quit)]
+    [InlineData("n", PromptAction.NewGame)]
+    [InlineData("N", PromptAction.NewGame)]
     [InlineData("space", PromptAction.AdvanceMacro)]
     [InlineData("SPACE", PromptAction.AdvanceMacro)]
     [InlineData("x", PromptAction.Unknown)]
@@ -19,7 +21,7 @@ public sealed class PromptDecoderTests
     }
 
     [Fact]
-    public void FromConsoleKey_MapsEnterSpaceAndQuit()
+    public void FromConsoleKey_MapsEnterSpaceNewGameAndQuit()
     {
         Assert.Equal(
             PromptAction.AdvanceTick,
@@ -30,6 +32,9 @@ public sealed class PromptDecoderTests
         Assert.Equal(
             PromptAction.Quit,
             PromptDecoder.FromConsoleKey(new ConsoleKeyInfo('q', ConsoleKey.Q, false, false, false)));
+        Assert.Equal(
+            PromptAction.NewGame,
+            PromptDecoder.FromConsoleKey(new ConsoleKeyInfo('n', ConsoleKey.N, false, false, false)));
         Assert.Equal(
             PromptAction.Unknown,
             PromptDecoder.FromConsoleKey(new ConsoleKeyInfo('x', ConsoleKey.X, false, false, false)));

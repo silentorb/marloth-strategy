@@ -18,7 +18,7 @@ public sealed class TickReportPrinterTests
         new TestingNodeConfig(Effort: 10, FallacyReduction: 5),
         new SellNodeConfig(Effort: 10, PayoutFloor: 0),
         new TreasuryNodeConfig(Effort: 1),
-        new PayrollNodeConfig(Period: 5, BaseEffort: 1, PerActorEffort: 1),
+        new PayrollNodeConfig(new PayrollScheduleConfig("month", "day", 0, 10), BaseEffort: 1, PerActorEffort: 1),
         new MergeNodeConfig(Effort: 1),
         new DesignNodeConfig(Effort: 3, DesignDelta: 1, DarknessReduction: 0.9));
 
@@ -264,6 +264,45 @@ public sealed class TickReportPrinterTests
         Assert.True(
             treasuryLine.Count(c => c == BoxDrawing.SingleVertical) >= 2,
             $"Expected at least two column separators on treasury money row: {treasuryLine}");
+    }
+
+    [Fact]
+    public void FormatScreen_DeltaColumn_CountsThroughputOnPassThroughMoneyPorts()
+    {
+        var baseline = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors);
+        var current = baseline with
+        {
+            Tick = 40,
+            PortFlowTotals = baseline.PortFlowTotals
+                .SetItem(
+                    new PortKey(MagicAgencySeed.PayrollNodeId, MagicAgencySeed.MoneyPortId),
+                    -15)
+                .SetItem(
+                    new PortKey(MagicAgencySeed.SellNodeId, MagicAgencySeed.MoneyPortId),
+                    24),
+        };
+
+        var text = TickReportPrinter.FormatScreen(
+            current,
+            previous: baseline,
+            width: PanelLayout.DefaultWidth,
+            baseline: baseline);
+        var normalized = text.Replace("\r\n", "\n");
+        var lines = normalized.Split('\n');
+
+        var payrollLine = MoneyRowAfter(lines, $"{MagicAgencySeed.PayrollNodeId.Value}:");
+        Assert.Contains("-15", payrollLine);
+        var sellLine = MoneyRowAfter(lines, $"{MagicAgencySeed.SellNodeId.Value}:");
+        Assert.Contains("+24", sellLine);
+    }
+
+    private static string MoneyRowAfter(string[] lines, string subpanelHeader)
+    {
+        var start = Array.FindIndex(lines, l => l.Contains(subpanelHeader, StringComparison.Ordinal));
+        Assert.True(start >= 0, $"Missing subpanel header '{subpanelHeader}'.");
+        var row = Array.FindIndex(lines, start, l => l.Contains("money:", StringComparison.Ordinal));
+        Assert.True(row >= 0, $"Missing money row after '{subpanelHeader}'.");
+        return lines[row];
     }
 
     private static string DeltaCaptionInPanel() => "\u0394";

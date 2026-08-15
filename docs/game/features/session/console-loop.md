@@ -18,12 +18,13 @@ The ASCII console prototype runs an open-ended session: the player advances prod
 - At the prompt (interactive terminal: single keypress, no extra Enter after `q` or Space):
   - **Enter** advances the next tick.
   - **Space** advances one macro unit.
+  - **`n`** / **`N`** starts a new game with the session's configured scenario and seed, returning to the tick-0 screen.
   - **`q`** / **`Q`** exits the session immediately.
   - Other keys are rejected with a short hint; the prompt repeats after a full screen redraw.
   - End of stdin (EOF) exits the session.
-  - When stdin is redirected (non-interactive), the same rules apply in line mode (empty line = Enter, `space` line = Space, `q` line = quit).
+  - When stdin is redirected (non-interactive), the same rules apply in line mode (empty line = Enter, `space` line = Space, `n` line = new game, `q` line = quit).
 - There is **no win/loss**. The player may progress indefinitely; nodes may run out of resources and stop meaningfully producing.
-- After each advance, the console **clears** and shows a **bordered panel screen**: a top status strip (`Tick N`, calendar positions such as `month 1, week 1/4, day 1/7`, `scenario: {preset-or-random} seed {N}`, `actors:`), a left column of per-node subpanels (port stocks and cumulative **cycles** on the left of each subpanel; signed net change since tick 0 in a middle **Δ** column; preferred actor assignments and weights on the right), and a right column with a laid-out flow graph of nodes and edges. Leaf values that changed this advance are annotated as `previous → current` (Unicode right arrow), comparing the state before the whole advance to the state after. Unchanged leaves show the current value only.
+- After each advance, the console **clears** and shows a **bordered panel screen**: a top status strip (`Tick N`, calendar positions such as `month 1, week 1/4, day 1/7`, `scenario: {preset-or-random} seed {N}`, `actors:`), a left column of per-node subpanels (port stocks and cumulative **cycles** on the left of each subpanel; signed net change since tick 0 in a middle **Δ** column (money counts everything that has flowed through a port, so sale income reads `+` and paid wages read `-` even though those ports hold no stock); preferred actor assignments and weights on the right), and a right column with a laid-out flow graph of nodes and edges. Leaf values that changed this advance are annotated as `previous → current` (Unicode right arrow), comparing the state before the whole advance to the state after. Unchanged leaves show the current value only.
 - Before the first prompt, the console shows the same screen for **tick 0** (no change arrows) so the player has a baseline.
 
 ## Related docs

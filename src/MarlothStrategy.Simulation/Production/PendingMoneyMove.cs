@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+
 namespace MarlothStrategy.Simulation.Production;
 
 public enum MoneyMoveDirection
@@ -7,4 +9,8 @@ public enum MoneyMoveDirection
 }
 
 /// <summary>One pending treasury money move (FIFO on <see cref="GameState.PendingMoneyMoves"/>).</summary>
-public sealed record PendingMoneyMove(MoneyMoveDirection Direction, double Amount);
+public sealed record PendingMoneyMove(
+    MoneyMoveDirection Direction,
+    double Amount,
+    int? PayrollRunPeriodIndex = null,
+    ImmutableArray<PayrollObligation>? Payees = null);

@@ -4,6 +4,7 @@ public enum PromptAction
 {
     AdvanceTick,
     AdvanceMacro,
+    NewGame,
     Quit,
     Unknown,
 }
@@ -31,6 +32,11 @@ public static class PromptDecoder
             return PromptAction.Quit;
         }
 
+        if (trimmed.Equals("n", StringComparison.OrdinalIgnoreCase))
+        {
+            return PromptAction.NewGame;
+        }
+
         if (trimmed.Equals("space", StringComparison.OrdinalIgnoreCase))
         {
             return PromptAction.AdvanceMacro;
@@ -54,6 +60,11 @@ public static class PromptDecoder
         if (key.KeyChar is 'q' or 'Q')
         {
             return PromptAction.Quit;
+        }
+
+        if (key.KeyChar is 'n' or 'N')
+        {
+            return PromptAction.NewGame;
         }
 
         return PromptAction.Unknown;

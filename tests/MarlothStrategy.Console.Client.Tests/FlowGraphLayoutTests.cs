@@ -15,7 +15,7 @@ public sealed class FlowGraphLayoutTests
         new TestingNodeConfig(Effort: 10, FallacyReduction: 5),
         new SellNodeConfig(Effort: 10, PayoutFloor: 0),
         new TreasuryNodeConfig(Effort: 1),
-        new PayrollNodeConfig(Period: 5, BaseEffort: 1, PerActorEffort: 1),
+        new PayrollNodeConfig(new PayrollScheduleConfig("month", "day", 0, 10), BaseEffort: 1, PerActorEffort: 1),
         new MergeNodeConfig(Effort: 1),
         new DesignNodeConfig(Effort: 3, DesignDelta: 1, DarknessReduction: 0.9));
 

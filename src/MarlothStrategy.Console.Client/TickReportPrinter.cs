@@ -308,9 +308,12 @@ public static class TickReportPrinter
         if (kind == SignalKind.Resource)
         {
             var currentText = FormatResourceLeaf(current);
+            // Pass-through ports hold no stock, so throughput carries the lifetime signal.
             var delta = baseline is null
                 ? string.Empty
-                : FormatSignedDelta(RoundedResource(baseValue), RoundedResource(current));
+                : FormatSignedDelta(
+                    RoundedResource(baseValue) + RoundAway(baseline.PortFlowTotals.GetValueOrDefault(key)),
+                    RoundedResource(current) + RoundAway(state.PortFlowTotals.GetValueOrDefault(key)));
             if (previous is null)
             {
                 rows.Add(new($"  {port.Id.Value}: {currentText}", delta));

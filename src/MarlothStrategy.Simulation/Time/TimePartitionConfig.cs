@@ -83,6 +83,46 @@ public sealed class TimePartitionConfig : IEquatable<TimePartitionConfig>
     }
 
     /// <summary>
+    /// Zero-based absolute index of <paramref name="unitName"/> at <paramref name="tick"/>.
+    /// </summary>
+    public int AbsoluteIndex(string unitName, int tick)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(unitName);
+        if (tick < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(tick), tick, "Tick must be non-negative.");
+        }
+
+        return tick / TicksPer(unitName);
+    }
+
+    /// <summary>
+    /// One-based index of <paramref name="childUnit"/> within <paramref name="parentUnit"/> at
+    /// <paramref name="tick"/>. Both units must be declared (or <c>tick</c> as the leaf), and
+    /// parent duration must be an integer multiple of child duration.
+    /// </summary>
+    public int PositionWithin(string childUnit, string parentUnit, int tick)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(childUnit);
+        ArgumentException.ThrowIfNullOrWhiteSpace(parentUnit);
+        if (tick < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(tick), tick, "Tick must be non-negative.");
+        }
+
+        var childTicks = TicksPer(childUnit);
+        var parentTicks = TicksPer(parentUnit);
+        if (parentTicks % childTicks != 0)
+        {
+            throw new InvalidOperationException(
+                $"Unit '{parentUnit}' duration {parentTicks} is not a multiple of '{childUnit}' duration {childTicks}.");
+        }
+
+        var childrenPerParent = parentTicks / childTicks;
+        return (tick / childTicks) % childrenPerParent + 1;
+    }
+
+    /// <summary>
     /// Named units (smallest → largest) whose absolute index increases over
     /// (<paramref name="fromTick"/>, <paramref name="toTick"/>]. Empty when the range is empty
     /// or no boundary is crossed. Does not include the leaf <c>tick</c> name.

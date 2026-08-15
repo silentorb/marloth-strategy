@@ -49,9 +49,11 @@ Identifiers are strings (or thin string wrappers): `NodeId`, `EdgeId`, `NodeType
 | `Assignment` | Preferred `ActorId` → `NodeId` with positive relative `Weight` (`decimal`, default `1`) (many nodes per actor) |
 | `PendingMoneyMove` | FIFO treasury queue entry: direction `In` / `Out` + `Amount` |
 | `NodeTypeConfigs` | Per-type behavior numerics loaded from JSON and attached to state |
-| `GameState` | Graph + catalog + port signals + actors + preferred assignments + node configs + **node progress** + **node timers** + **node cycles** + **pending money moves** + **enchantment block map** + **next unit id** + `Tick` + **`TimePartitions`** (immutable nested calendar) |
+| `GameState` | Graph + catalog + port signals + **port flow totals** + actors + preferred assignments + node configs + **node progress** + **node timers** + **node cycles** + **pending money moves** + **enchantment block map** + **next unit id** + `Tick` + **`TimePartitions`** (immutable nested calendar) |
 
-Port signals are keyed by `(NodeId, PortId)`. Node progress, node timers, and node cycles are keyed by `NodeId`.
+Port signals and port flow totals are keyed by `(NodeId, PortId)`. Node progress, node timers, and node cycles are keyed by `NodeId`.
+
+`PortFlowTotals` (`double`, default `0`) accumulates money that passes through a port without resting in committed stock, so throughput survives after the stock clears: `sell` adds the emitted payout (`+`) and `payroll` subtracts the wages it disburses off its money input (`-`). Treasury keeps money in committed stock and adds nothing, so its pile is never double-counted. The console Δ column reads stock plus this total.
 
 ### Signal kinds
 
@@ -71,7 +73,7 @@ Preferred assignments live on `GameState.Assignments`. Each tick, **effective** 
 | `enchant` / `testing` / `design` / `sell` | Enchantment on process input port |
 | `merge` | Enchantments on both `primary` and `secondary` input ports |
 | `treasury` | `PendingMoneyMoves` non-empty |
-| `payroll` | Timer elapsed `>= period` (payday due) |
+| `payroll` | Open payroll run with attempt not yet submitted |
 
 For each actor, over that actor’s effective assignments: `assignmentEffortPerNode = Capacity × weight / Σ(effective weights)`. Equal weights yield an even split (`Capacity / count`). Weights must be `> 0`; a non-positive weight or zero effective weight sum is fail-fast.  
 Per node: assignment effort = sum of contributions. Unassigned / not effective → `0`.
@@ -89,7 +91,7 @@ Node configs include:
 - design also has `designDelta`, `darknessReduction`
 - testing also has `fallacyReduction`
 - sell also has `payoutFloor`
-- payroll has `period`, `baseEffort`, `perActorEffort` (required work = `baseEffort + perActorEffort ×` paid-actor count)
+- payroll has `schedule` (`periodUnit`, `positionUnit`, `startLead`, `dueDay`), `baseEffort`, `perActorEffort` (required work = `baseEffort + perActorEffort ×` snapshot obligation count)
 
 **Enchant** required work per mutation = `config.effort + current.darkness` (recomputed after each mutate). Other nodes use `config.effort` per application. While progress covers the required amount, applications run and subtract that amount; each application increments that node’s `NodeCycles` by `1`.
 
@@ -133,6 +135,7 @@ Tunable numerics live in `config/node-types/{enchant,testing,design,merge,sell,t
 - Input: `enchantment`; output: `money`.
 - Stat: `sales` (default `1`).
 - Add progress from assignment; when `progress >= effort`, consume enchantment and **emit** `max(payoutFloor, volumeCount - fallacy)` on the money output. Otherwise leave enchantment residual and emit no money.
+- Each emitted payout adds to `PortFlowTotals` on the money output (lifetime sale income).
 - Edge `sell.money` → `treasury.money` enqueues pending inbound (does not immediately grow the committed pile).
 
 ### `treasury`
@@ -141,20 +144,20 @@ Tunable numerics live in `config/node-types/{enchant,testing,design,merge,sell,t
 - Config: `effort` (seed `1`).
 - Stat: `treasury` (default `1`).
 - Always residuals the committed money pile.
-- Effective when pending queue non-empty. Gain progress when assigned; each application dequeues **one** move from the start-of-tick queue and subtracts `effort`. **In** adds to the pile. **Out** debits if pile ≥ amount and emits that amount on the money output (routed by edges, e.g. to payroll); otherwise mass-quit (clear actors and assignments), drop the out-move, leave pile unchanged, emit nothing.
+- Effective when pending queue non-empty. Gain progress when assigned; each application dequeues **one** move from the start-of-tick queue and subtracts `effort`. **In** adds to the pile. **Out** (payroll-tagged): deterministically shuffle unpaid obligations for that run, pay each whole wage that fits the remaining pile, debit/emit that sum, mark those actors paid on the active run, and drop the remainder of the move; nobody leaves immediately. Ordinary amount-only outs (tests / legacy) debit when affordable, otherwise drop without debiting and without clearing the roster.
 - Does not process moves enqueued later in the same tick (no same-tick money chain).
 
 ### `payroll`
 
-- Input: `money` (receives routed wage payouts; consumed/disbursed — not residualled across ticks).
-- Config: `period`, `baseEffort`, `perActorEffort` (seed `5` / `1` / `1`).
+- Input: `money` (receives routed wage payouts; consumed/disbursed — not residualled across ticks). Each disbursed amount subtracts from `PortFlowTotals` on that port (lifetime wages paid).
+- Config: `schedule` (`periodUnit` / `positionUnit` / `startLead` / `dueDay`; seed `month` / `day` / `0` / `10`), `baseEffort`, `perActorEffort` (seed `1` / `1`). `dueDay` must leave enough ticks for payroll to finish **and** treasury to deliver on a later tick.
 - Stat: `payroll` (default `1`).
-- `GameState.NodeTimers[payroll]` is an elapsed count seeded to `0`.
-- **Timer (no actor):** when start-of-tick `elapsed < period`, end-of-tick sets `elapsed + 1`. When start-of-tick `elapsed >= period`, payday is due (timer unchanged unless payday application resets it to `0`).
-- **Payday due (start of tick `elapsed >= period`):** effective for assignment. Gain progress when assigned; when `progress >=` required work (`baseEffort + perActorEffort ×` count of roster actors with an explicit `Wage`), if wage total `> 0` require at least one funding edge from a treasury `money` port to this node’s `money` input, then enqueue pending outbound for the sum of those explicit wages; reset progress to `0`; reset timer to `0`. Missing funding edge with wage total `> 0` is fail-fast. Wage total `0` (no paid actors) → reset progress and timer without enqueue.
-- Actors without an explicit `Wage` are excluded from both wage total and paid-actor count. Shortfall / mass-quit runs when treasury applies the out-move.
+- `GameState.ActivePayrollRun` is optional; seed starts with none.
+- **Open:** at the start of each tick, when there is no active run and the calendar is on the configured start day within the period (seed: last day of `month` = `daysInPeriod - startLead`), open a run whose `PeriodIndex` is the absolute period index at that tick and whose obligations snapshot every currently waged actor (ordered by id) with that actor’s wage. Unwaged actors are excluded.
+- **Effective:** while an active run exists and `AttemptSubmitted` is false. Gain progress when assigned; when `progress >=` required work (`baseEffort + perActorEffort ×` obligation count), if wage total `> 0` require at least one funding edge from a treasury `money` port to this node’s `money` input, then enqueue one pending outbound tagged with the run’s period index and per-actor obligations; reset progress to `0`; set `AttemptSubmitted`. Missing funding edge with wage total `> 0` is fail-fast. Wage total `0` → submit the attempt without enqueue.
+- Only one attempt per run. Actors count as paid only when treasury emits their full wage.
+- **Deadline:** after compute/commit on a tick, if the next tick is past the due day of the following period (seed: after day `10` of `PeriodIndex + 1`), remove still-unpaid obligation actors and only their assignments, cancel pending outs tagged for that run, and clear `ActivePayrollRun`.
 - v1: exactly one `payroll` and one `treasury` node in the seed graph; missing/duplicate is fail-fast.
-- **Deferred:** payroll may later bind to a named global time-partition interval instead of a raw tick `period`. Until then, `period` stays tick-based and independent of week/month lengths.
 
 ## Time partitions
 
@@ -181,9 +184,11 @@ Seed defaults: 1 tick = 1 day; 7 days = 1 week; 4 weeks = 1 month; session macro
 
 `TimePartitionConfig.PositionsAt(tick)` returns one-based positions for each configured unit (smallest → largest). Nested units report `index/ofParent` (e.g. day `1/7`, week `1/4`); the largest unit is unbounded (`month 1`, `month 2`, …). At tick `0` every unit is at position `1`. Exact multiples roll into the next unit (tick `7` → day `1/7`, week `2/4`).
 
-### Boundary queries
+### Boundary and position queries
 
-`BoundariesCrossed(fromTick, toTick)` returns configured unit names (smallest → largest) whose absolute index increases over `(fromTick, toTick]`. Empty when `fromTick == toTick`. This is the scheduling seam for future node logic; payroll does **not** use it yet.
+`BoundariesCrossed(fromTick, toTick)` returns configured unit names (smallest → largest) whose absolute index increases over `(fromTick, toTick]`. Empty when `fromTick == toTick`.
+
+`AbsoluteIndex(unit, tick)` is `tick / TicksPer(unit)` (zero-based). `PositionWithin(childUnit, parentUnit, tick)` is the one-based index of the child inside the parent at that tick. Payroll’s schedule uses these helpers (not a raw tick countdown).
 
 ### Macro advance
 
@@ -210,12 +215,13 @@ ProductionTickResult AdvanceTicksWithReport(GameState state, int tickCount);
 
 Pipeline (each step returns new data; no mutation of prior state):
 
-1. **`ResolveInputs`** — For each node input port, take the value already committed on that port.
-2. **`ResolveEffectiveAssignments` / assignment effort** — Filter preferred assignments by prerequisites; split each actor’s capacity by relative weights over effective rows.
-3. **`ComputeOutputs`** — Node-type-specific behavior using each node’s port inputs, assignment effort, stats, progress, and start-of-tick pending moves. Nodes are independent (no same-tick money chain). Node iteration order must not change results. May enqueue payroll outbound onto a next-pending builder (when a treasury→payroll money funding edge exists); treasury only drains the start-of-tick queue into residuals / actor updates and may emit money on successful outs.
-4. **`CommitSignals`** — Residuals; route outputs (group by destination; residual + routed copies **`+`** — money `AddResource`, enchantment `TryCombine`; incompatible enchantment histories omit the dest key; money to treasury **enqueues inbound** on the pending builder, including treasury→payroll wage delivery). Register any new combined enchantment block.
-5. **`AdvancePayrollTimer`** — If payroll elapsed `< period`, increment by 1 (no auto-pay).
-6. **`NextState`** — New signals, updated progress/timers/cycles/pending maps, actors/assignments, `Tick + 1`.
+1. **`OpenPayrollRunIfDue`** — If there is no active run and the calendar is on the configured start day, snapshot waged actors into `ActivePayrollRun`.
+2. **`ResolveInputs`** — For each node input port, take the value already committed on that port.
+3. **`ResolveEffectiveAssignments` / assignment effort** — Filter preferred assignments by prerequisites; split each actor’s capacity by relative weights over effective rows.
+4. **`ComputeOutputs`** — Node-type-specific behavior using each node’s port inputs, assignment effort, stats, progress, active payroll run, and start-of-tick pending moves. Nodes are independent (no same-tick money chain). Node iteration order must not change results. May enqueue payroll outbound onto a next-pending builder (when a treasury→payroll money funding edge exists); treasury only drains the start-of-tick queue into residuals / payroll-run paid marks and may emit money on successful outs. Sale payouts and payroll disbursements also accumulate onto `PortFlowTotals`.
+5. **`CommitSignals`** — Residuals; route outputs (group by destination; residual + routed copies **`+`** — money `AddResource`, enchantment `TryCombine`; incompatible enchantment histories omit the dest key; money to treasury **enqueues inbound** on the pending builder, including treasury→payroll wage delivery). Register any new combined enchantment block.
+6. **`ClosePayrollIfPastDue`** — If the next tick is past the active run’s due day, remove unpaid obligation actors and their assignments, cancel stale payroll outs for that run, and clear the run.
+7. **`NextState`** — New signals, updated progress/cycles/pending/flow-total maps, actors/assignments, active payroll run, `Tick + 1`.
 
 Host pattern:
 
@@ -229,22 +235,22 @@ state = AdvanceTick(state); // mutable binding, immutable values
 
 ## Scenarios
 
-Play bootstrap: `ScenarioBootstrap.CreateInitialState(GameConfig)` (loads node configs, actor definitions, scenario JSON, and **time partitions** from `config/` under the app base directory; overloads accept explicit configs/actors/pool/time partitions). `GameConfig.ScenarioPreset` selects a named file `config/scenarios/{name}.json`; null/whitespace generates a random scenario from `SCENARIO_SEED`. Unknown presets, invalid JSON, missing actors, assignments to absent nodes, or presets that include both testing and design are fail-fast (`InvalidOperationException` with path context).
+Play bootstrap: `ScenarioBootstrap.CreateInitialState(GameConfig)` (loads node configs, actor definitions, scenario JSON, and **time partitions** from `config/` under the app base directory; overloads accept explicit configs/actors/pool/time partitions). `GameConfig.ScenarioPreset` selects a named file `config/scenarios/{name}.json`; null/whitespace generates a random scenario from `SCENARIO_SEED`. Unknown presets, invalid JSON, missing actors, assignments to absent nodes, invalid payroll schedule units, or presets that include both testing and design are fail-fast (`InvalidOperationException` with path context).
 
 - Node types: `enchant` (in/out `enchantment`), `design` (in/out `enchantment`), `testing` (in/out `enchantment`), `merge` (in `primary`/`secondary`, out `enchantment`; catalog only — not in seeded graphs), `sell` (in `enchantment`, out `money`), `treasury` (in/out `money`), `payroll` (in `money`). Catalog always includes all seven types.
 - **Essential graph:** nodes `enchant`, `sell`, `treasury`, `payroll`; edges `enchant.enchantment` → `enchant.enchantment` (self-loop); `enchant.enchantment` → `sell.enchantment`; `sell.money` → `treasury.money` (pending inbound on commit); `treasury.money` → `payroll.money`.
 - **Testing variation:** add node `testing`; keep the enchant self-loop; replace `enchant→sell` with `enchant.enchantment` → `testing.enchantment`; `testing.enchantment` → `sell.enchantment`; `testing.enchantment` → `enchant.enchantment` (fan-in `+` with the self-loop); money edges unchanged.
 - **Design variation:** add node `design`; replace the enchant self-loop with `enchant.enchantment` → `design.enchantment` → `enchant.enchantment` (design is the sole input into enchant); keep `enchant.enchantment` → `sell.enchantment` and money edges. Mutually exclusive with testing.
-- **Preset `lab01`:** `includeTesting: true`, `includeDesign: false`; actors `intern` and `boss` (stats as configured, wages unset). Preferred assignments (weight `1` each): intern → enchant, testing; boss → payroll, sell, treasury.
+- **Preset `lab01`:** `includeTesting: true`, `includeDesign: false`; actors `intern` (wage `2`) and `boss` (wage `3`), stats as configured. Preferred assignments (weight `1` each): intern → enchant, testing; boss → payroll, sell, treasury.
 - **Actor pool:** `config/scenarios/actor-pool.json` lists eligible actor ids (not every file under `config/actors/`). Random generation: equal thirds among none / testing / design (never both); 2–4 distinct pool actors; preferred assignments (weight `1`) cover **every** graph node; multi-actor overlap on a node is allowed but sparse (more likely when actors are plentiful relative to nodes). Deterministic for a fixed seed.
-- Initial signals: `enchant.enchantment` = genesis empty block; `treasury.money` = `100`; `EnchantmentBlocks` contains genesis; `NextUnitId` = `1`; progress empty/`0`; cycles empty/`0`; payroll timer = `0`; pending money moves empty; `Tick = 0`; `TimePartitions` from committed `config/time-partitions.json`.
+- Initial signals: `enchant.enchantment` = genesis empty block; `treasury.money` = `100`; `EnchantmentBlocks` contains genesis; `NextUnitId` = `1`; progress empty/`0`; cycles empty/`0`; no active payroll run; pending money moves empty; `Tick = 0`; `TimePartitions` from committed `config/time-partitions.json`.
 
 ## Layout
 
 Under `src/MarlothStrategy.Simulation/`:
 
 - `Graph/` — structural Imp-like types
-- `Production/` — signals, catalog, `GameState`, scenario bootstrap/generation, seed compatibility, `AdvanceTick` / `AdvanceTicks`, config DTOs/loaders, pending money moves
+- `Production/` — signals, catalog, `GameState`, scenario bootstrap/generation, seed compatibility, `AdvanceTick` / `AdvanceTicks`, config DTOs/loaders, pending money moves, payroll run
 - `Time/` — nested time partition types, position/boundary queries, loader
 - `config/node-types/` — JSON behavior numerics per node type (copied to output)
 - `config/actors/` — JSON actor definitions (copied to output)
@@ -253,7 +259,7 @@ Under `src/MarlothStrategy.Simulation/`:
 
 ## Error handling
 
-Seed and tick assume a well-formed graph for v1 (programmer invariants). Malformed catalogs or missing node types are exceptional (`InvalidOperationException`). Missing or invalid node-type, actor, preset, actor-pool, or **time-partition** JSON at seed/boot is exceptional (fail-fast with path context). Expected empty stocks, incompatible-enchantment empty ports, payday mass-quit, and empty pending queues are normal.
+Seed and tick assume a well-formed graph for v1 (programmer invariants). Malformed catalogs or missing node types are exceptional (`InvalidOperationException`). Missing or invalid node-type, actor, preset, actor-pool, or **time-partition** JSON at seed/boot is exceptional (fail-fast with path context). Expected empty stocks, incompatible-enchantment empty ports, payroll funding shortfalls (partial whole-actor pay), unpaid departures at the deadline, and empty pending queues are normal.
 
 ## Related docs
 

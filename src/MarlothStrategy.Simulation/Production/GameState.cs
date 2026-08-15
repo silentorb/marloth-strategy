@@ -18,4 +18,14 @@ public sealed record GameState(
     ImmutableDictionary<string, EnchantmentBlock> EnchantmentBlocks,
     ulong NextUnitId,
     int Tick,
-    TimePartitionConfig TimePartitions);
+    TimePartitionConfig TimePartitions,
+    PayrollRun? ActivePayrollRun = null)
+{
+    /// <summary>
+    /// Lifetime signed resource that passed through a port without resting in
+    /// <see cref="PortSignals"/>: money created on an output (`+`) or disbursed off an
+    /// input (`-`). Committed stock alone hides throughput on pass-through money ports.
+    /// </summary>
+    public ImmutableDictionary<PortKey, double> PortFlowTotals { get; init; } =
+        ImmutableDictionary<PortKey, double>.Empty;
+}

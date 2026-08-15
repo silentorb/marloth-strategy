@@ -1,5 +1,10 @@
 {
-  "period": 5,
+  "schedule": {
+    "periodUnit": "month",
+    "positionUnit": "day",
+    "startLead": 0,
+    "dueDay": 10
+  },
   "baseEffort": 1,
   "perActorEffort": 1
 }

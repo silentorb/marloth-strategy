@@ -21,9 +21,16 @@ public sealed record SellNodeConfig(
 /// <summary>Numeric parameters for the treasury node type (loaded from JSON).</summary>
 public sealed record TreasuryNodeConfig(double Effort);
 
+/// <summary>Calendar schedule for opening and closing a payroll obligation window.</summary>
+public sealed record PayrollScheduleConfig(
+    string PeriodUnit,
+    string PositionUnit,
+    int StartLead,
+    int DueDay);
+
 /// <summary>Numeric parameters for the payroll node type (loaded from JSON).</summary>
 public sealed record PayrollNodeConfig(
-    int Period,
+    PayrollScheduleConfig Schedule,
     double BaseEffort,
     double PerActorEffort);
 

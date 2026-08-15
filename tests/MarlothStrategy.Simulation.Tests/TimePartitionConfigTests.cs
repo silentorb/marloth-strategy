@@ -84,6 +84,20 @@ public sealed class TimePartitionConfigTests
     }
 
     [Fact]
+    public void AbsoluteIndex_AndPositionWithin_MatchSeedCalendar()
+    {
+        var config = TimePartitionConfigLoader.LoadFromBaseDirectory();
+
+        Assert.Equal(0, config.AbsoluteIndex("month", 0));
+        Assert.Equal(0, config.AbsoluteIndex("month", 27));
+        Assert.Equal(1, config.AbsoluteIndex("month", 28));
+        Assert.Equal(28, config.PositionWithin("day", "month", 27));
+        Assert.Equal(1, config.PositionWithin("day", "month", 28));
+        Assert.Equal(5, config.PositionWithin("day", "month", 32));
+        Assert.Equal(6, config.PositionWithin("day", "month", 33));
+    }
+
+    [Fact]
     public void BoundariesCrossed_EmptyRange_IsEmpty()
     {
         var config = TimePartitionConfigLoader.LoadFromBaseDirectory();

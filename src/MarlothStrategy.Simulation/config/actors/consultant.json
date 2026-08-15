@@ -1,6 +1,7 @@
 {
   "id": "consultant",
   "capacity": 1.0,
+  "wage": 3,
   "stats": {
     "merging": 10,
     "payroll": 5

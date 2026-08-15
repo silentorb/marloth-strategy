@@ -17,7 +17,7 @@ public static class ConsoleClient
         while (true)
         {
             System.Console.Write(
-                $"Enter = next tick, Space = next {advanceLabel}, q = quit> ");
+                $"Enter = next tick, Space = next {advanceLabel}, n = new game, q = quit> ");
             switch (ReadPromptAction())
             {
                 case PromptAction.Quit:
@@ -27,8 +27,14 @@ public static class ConsoleClient
                 case PromptAction.Unknown:
                     DrawReport(state, config, baseline);
                     System.Console.WriteLine(
-                        $"Unknown input. Press Enter for next tick, Space for next {advanceLabel}, or q to quit.");
+                        $"Unknown input. Press Enter for next tick, Space for next {advanceLabel}, n for a new game, or q to quit.");
                     continue;
+                case PromptAction.NewGame:
+                    state = ScenarioBootstrap.CreateInitialState(config);
+                    baseline = state;
+                    advanceLabel = state.TimePartitions.AdvanceUnit;
+                    DrawReport(state, config, baseline);
+                    break;
                 case PromptAction.AdvanceTick:
                     AdvanceAndDraw(ref state, config, baseline, tickCount: 1);
                     break;
@@ -100,7 +106,7 @@ public static class ConsoleClient
     }
 
     /// <summary>
-    /// Interactive terminals use single-key <see cref="System.Console.ReadKey"/> (Enter / Space / q).
+    /// Interactive terminals use single-key <see cref="System.Console.ReadKey"/> (Enter / Space / n / q).
     /// Redirected stdin (agent smoke) falls back to line mode.
     /// </summary>
     private static PromptAction ReadPromptAction()

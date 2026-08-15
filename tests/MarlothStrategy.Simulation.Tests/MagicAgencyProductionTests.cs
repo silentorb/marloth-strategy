@@ -16,7 +16,7 @@ public sealed class MagicAgencyProductionTests
         new TestingNodeConfig(Effort: 10, FallacyReduction: 5),
         new SellNodeConfig(Effort: 10, PayoutFloor: 0),
         new TreasuryNodeConfig(Effort: 1),
-        new PayrollNodeConfig(Period: 5, BaseEffort: 1, PerActorEffort: 1),
+        new PayrollNodeConfig(new PayrollScheduleConfig("month", "day", 0, 10), BaseEffort: 1, PerActorEffort: 1),
         new MergeNodeConfig(Effort: 1),
         new DesignNodeConfig(Effort: 3, DesignDelta: 1, DarknessReduction: 0.9));
 
@@ -181,7 +181,8 @@ public sealed class MagicAgencyProductionTests
         Assert.All(state.Assignments, a => Assert.Equal(1m, a.Weight));
         Assert.Equal(2, state.Actors.Count);
         Assert.True(state.Actors.ContainsKey(MagicAgencySeed.BossActorId));
-        Assert.Equal(0, state.NodeTimers[MagicAgencySeed.PayrollNodeId]);
+        Assert.Null(state.ActivePayrollRun);
+        Assert.Empty(state.NodeTimers);
         Assert.Equal(DefaultConfigs, state.NodeConfigs);
         AssertCounts(
             Signal(state, MagicAgencySeed.EnchantNodeId, MagicAgencySeed.EnchantmentPortId),
@@ -226,7 +227,7 @@ public sealed class MagicAgencyProductionTests
             new SignalValue.Money(100),
             Signal(next, MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId));
         Assert.Empty(next.PendingMoneyMoves);
-        Assert.Equal(1, next.NodeTimers[MagicAgencySeed.PayrollNodeId]);
+        Assert.Null(next.ActivePayrollRun);
         Assert.True(next.EnchantmentBlocks.Count >= 2);
 
         var enchant = Row(result, MagicAgencySeed.EnchantNodeId);
@@ -693,7 +694,65 @@ public sealed class MagicAgencyProductionTests
     }
 
     [Fact]
-    public void Payroll_TimerReachesDueWithoutActor_PaydayEnqueuesOut_TreasuryDebits()
+    public void PortFlowTotals_RecordSaleIncomeAndPayrollDisbursement()
+    {
+        var actors = ImmutableDictionary<ActorId, Actor>.Empty.Add(
+            MagicAgencySeed.ActorId,
+            new Actor(
+                MagicAgencySeed.ActorId,
+                Capacity: 1.0m,
+                ImmutableDictionary<string, double>.Empty
+                    .Add(ActorStatKeys.Sales, 10)
+                    .Add(ActorStatKeys.Payroll, 5)
+                    .Add(ActorStatKeys.Treasury, 2),
+                Wage: 10));
+
+        var sellMoneyKey = new PortKey(MagicAgencySeed.SellNodeId, MagicAgencySeed.MoneyPortId);
+        var payrollMoneyKey = new PortKey(MagicAgencySeed.PayrollNodeId, MagicAgencySeed.MoneyPortId);
+
+        var beforeSale = WithEnchantmentStock(
+            MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors) with
+            {
+                Tick = 27,
+                Actors = actors,
+                Assignments = ImmutableArray.Create(
+                    new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.SellNodeId)),
+                PortSignals = ImmutableDictionary<PortKey, SignalValue>.Empty.Add(
+                    new PortKey(MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId),
+                    new SignalValue.Money(100)),
+            },
+            new PortKey(MagicAgencySeed.SellNodeId, MagicAgencySeed.EnchantmentPortId),
+            Enchant(10, 1, 1));
+        Assert.Empty(beforeSale.PortFlowTotals);
+
+        // Sale money never rests on the sell port, so the payout only shows as lifetime flow.
+        var afterSale = ProductionTick.AdvanceTick(beforeSale);
+        Assert.Equal(9, afterSale.PortFlowTotals.GetValueOrDefault(sellMoneyKey));
+        Assert.Null(afterSale.PortSignals.GetValueOrDefault(sellMoneyKey));
+
+        var payday = ProductionTick.AdvanceTick(afterSale with
+        {
+            Assignments = ImmutableArray.Create(
+                new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.PayrollNodeId)),
+        });
+        var delivered = ProductionTick.AdvanceTick(payday with
+        {
+            Assignments = ImmutableArray.Create(
+                new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.TreasuryNodeId)),
+        });
+        Assert.Equal(
+            new SignalValue.Money(10),
+            Signal(delivered, MagicAgencySeed.PayrollNodeId, MagicAgencySeed.MoneyPortId));
+        Assert.Equal(0, delivered.PortFlowTotals.GetValueOrDefault(payrollMoneyKey));
+
+        var disbursed = ProductionTick.AdvanceTick(delivered);
+        Assert.Null(disbursed.PortSignals.GetValueOrDefault(payrollMoneyKey));
+        Assert.Equal(-10, disbursed.PortFlowTotals.GetValueOrDefault(payrollMoneyKey));
+        Assert.Equal(9, disbursed.PortFlowTotals.GetValueOrDefault(sellMoneyKey));
+    }
+
+    [Fact]
+    public void Payroll_OpensOnLastDay_PaydayEnqueuesOut_TreasuryDebits()
     {
         var actors = ImmutableDictionary<ActorId, Actor>.Empty.Add(
             MagicAgencySeed.ActorId,
@@ -705,45 +764,42 @@ public sealed class MagicAgencyProductionTests
                     .Add(ActorStatKeys.Treasury, 2),
                 Wage: 10));
 
-        var configs = DefaultConfigs with
+        var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors) with
         {
-            Payroll = new PayrollNodeConfig(Period: 1, BaseEffort: 1, PerActorEffort: 1),
-        };
-
-        var state = MagicAgencySeed.CreateInitialState(configs, DefaultActors) with
-        {
+            Tick = 27,
             Actors = actors,
             Assignments = ImmutableArray.Create(
                 new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.PayrollNodeId)),
             PortSignals = ImmutableDictionary<PortKey, SignalValue>.Empty.Add(
                 new PortKey(MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId),
                 new SignalValue.Money(100)),
-            NodeTimers = ImmutableDictionary<NodeId, int>.Empty.Add(
-                MagicAgencySeed.PayrollNodeId,
-                0),
         };
 
-        var afterCountdown = ProductionTick.AdvanceTick(state);
-        Assert.Equal(1, afterCountdown.NodeTimers[MagicAgencySeed.PayrollNodeId]);
-        Assert.Empty(afterCountdown.PendingMoneyMoves);
-
-        var afterPayday = ProductionTick.AdvanceTick(afterCountdown);
-        Assert.Equal(0, afterPayday.NodeTimers[MagicAgencySeed.PayrollNodeId]);
+        var afterPayday = ProductionTick.AdvanceTick(state);
+        Assert.NotNull(afterPayday.ActivePayrollRun);
+        Assert.Equal(0, afterPayday.ActivePayrollRun!.PeriodIndex);
+        Assert.True(afterPayday.ActivePayrollRun.AttemptSubmitted);
         Assert.Equal(0, afterPayday.NodeProgress.GetValueOrDefault(MagicAgencySeed.PayrollNodeId, 0));
         Assert.Equal(1, afterPayday.NodeCycles.GetValueOrDefault(MagicAgencySeed.PayrollNodeId, 0));
         Assert.Single(afterPayday.PendingMoneyMoves);
         Assert.Equal(MoneyMoveDirection.Out, afterPayday.PendingMoneyMoves[0].Direction);
         Assert.Equal(10, afterPayday.PendingMoneyMoves[0].Amount);
+        Assert.Equal(0, afterPayday.PendingMoneyMoves[0].PayrollRunPeriodIndex);
+        Assert.Equal(28, afterPayday.Tick);
+
+        var midMonth = ProductionTick.AdvanceTicks(state with { Tick = 10 }, 1);
+        Assert.Null(midMonth.ActivePayrollRun);
+        Assert.Empty(midMonth.PendingMoneyMoves);
 
         var withTreasury = afterPayday with
         {
             Assignments = ImmutableArray.Create(
                 new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.TreasuryNodeId)),
-            NodeTimers = afterPayday.NodeTimers.SetItem(MagicAgencySeed.PayrollNodeId, 0),
         };
         var afterDebit = ProductionTick.AdvanceTick(withTreasury);
 
         Assert.Empty(afterDebit.PendingMoneyMoves);
+        Assert.Contains(MagicAgencySeed.ActorId, afterDebit.ActivePayrollRun!.PaidActorIds);
         Assert.Equal(
             new SignalValue.Money(90),
             Signal(afterDebit, MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId));
@@ -758,35 +814,132 @@ public sealed class MagicAgencyProductionTests
     }
 
     [Fact]
-    public void TreasuryOut_Shortfall_MassQuitsWithoutDebiting()
+    public void TreasuryOut_Shortfall_PaysWholeActorsDeterministicallyWithoutImmediateQuit()
+    {
+        var a = new ActorId("a");
+        var b = new ActorId("b");
+        var c = new ActorId("c");
+        var actors = ImmutableDictionary<ActorId, Actor>.Empty
+            .Add(a, new Actor(a, 1.0m, ImmutableDictionary<string, double>.Empty.Add(ActorStatKeys.Treasury, 5), Wage: 10))
+            .Add(b, new Actor(b, 1.0m, ImmutableDictionary<string, double>.Empty, Wage: 10))
+            .Add(c, new Actor(c, 1.0m, ImmutableDictionary<string, double>.Empty, Wage: 10));
+
+        var obligations = ImmutableArray.Create(
+            new PayrollObligation(a, 10),
+            new PayrollObligation(b, 10),
+            new PayrollObligation(c, 10));
+        var run = new PayrollRun(0, obligations, ImmutableHashSet<ActorId>.Empty, AttemptSubmitted: true);
+
+        var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors) with
+        {
+            Tick = 30, // before due-day close so shortfall does not immediately remove actors
+            Actors = actors,
+            Assignments = ImmutableArray.Create(
+                new Assignment(a, MagicAgencySeed.TreasuryNodeId)),
+            PortSignals = ImmutableDictionary<PortKey, SignalValue>.Empty.Add(
+                new PortKey(MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId),
+                new SignalValue.Money(25)),
+            PendingMoneyMoves = ImmutableArray.Create(
+                new PendingMoneyMove(MoneyMoveDirection.Out, 30, 0, obligations)),
+            ActivePayrollRun = run,
+        };
+
+        var next = ProductionTick.AdvanceTick(state);
+
+        Assert.Equal(3, next.Actors.Count);
+        Assert.Single(next.Assignments);
+        Assert.Empty(next.PendingMoneyMoves);
+        Assert.Equal(2, next.ActivePayrollRun!.PaidActorIds.Count);
+        Assert.Equal(
+            new SignalValue.Money(5),
+            Signal(next, MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId));
+
+        var again = ProductionTick.AdvanceTick(state);
+        Assert.Equal(next.ActivePayrollRun.PaidActorIds, again.ActivePayrollRun!.PaidActorIds);
+    }
+
+    [Fact]
+    public void Payroll_PastDue_RemovesOnlyUnpaidActorsAndCancelsStaleRequest()
+    {
+        var paid = new ActorId("paid");
+        var unpaid = new ActorId("unpaid");
+        var unwaged = new ActorId("unwaged");
+        var actors = ImmutableDictionary<ActorId, Actor>.Empty
+            .Add(paid, new Actor(paid, 1.0m, ImmutableDictionary<string, double>.Empty, Wage: 10))
+            .Add(unpaid, new Actor(unpaid, 1.0m, ImmutableDictionary<string, double>.Empty, Wage: 10))
+            .Add(unwaged, new Actor(unwaged, 1.0m, ImmutableDictionary<string, double>.Empty));
+
+        var obligations = ImmutableArray.Create(
+            new PayrollObligation(paid, 10),
+            new PayrollObligation(unpaid, 10));
+        var run = new PayrollRun(
+            0,
+            obligations,
+            ImmutableHashSet.Create(paid),
+            AttemptSubmitted: true);
+
+        var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors) with
+        {
+            Tick = 37, // day 10 of month 2; next tick is day 11 → past due
+            Actors = actors,
+            Assignments = ImmutableArray.Create(
+                new Assignment(paid, MagicAgencySeed.EnchantNodeId),
+                new Assignment(unpaid, MagicAgencySeed.SellNodeId),
+                new Assignment(unwaged, MagicAgencySeed.TestingNodeId)),
+            PortSignals = ImmutableDictionary<PortKey, SignalValue>.Empty.Add(
+                new PortKey(MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId),
+                new SignalValue.Money(0)),
+            PendingMoneyMoves = ImmutableArray.Create(
+                new PendingMoneyMove(MoneyMoveDirection.Out, 20, 0, obligations)),
+            ActivePayrollRun = run,
+        };
+
+        var next = ProductionTick.AdvanceTick(state);
+
+        Assert.Null(next.ActivePayrollRun);
+        Assert.Equal(38, next.Tick);
+        Assert.False(next.Actors.ContainsKey(unpaid));
+        Assert.True(next.Actors.ContainsKey(paid));
+        Assert.True(next.Actors.ContainsKey(unwaged));
+        Assert.DoesNotContain(next.Assignments, a => a.ActorId == unpaid);
+        Assert.Contains(next.Assignments, a => a.ActorId == paid);
+        Assert.Contains(next.Assignments, a => a.ActorId == unwaged);
+        Assert.Empty(next.PendingMoneyMoves);
+    }
+
+    [Fact]
+    public void Payroll_DueDaySubmission_IsLateWithoutTreasuryDelivery()
     {
         var actors = ImmutableDictionary<ActorId, Actor>.Empty.Add(
             MagicAgencySeed.ActorId,
             new Actor(
                 MagicAgencySeed.ActorId,
                 Capacity: 1.0m,
-                ImmutableDictionary<string, double>.Empty.Add(ActorStatKeys.Treasury, 2)));
+                ImmutableDictionary<string, double>.Empty.Add(ActorStatKeys.Payroll, 5),
+                Wage: 10));
 
+        var obligations = ImmutableArray.Create(new PayrollObligation(MagicAgencySeed.ActorId, 10));
         var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors) with
         {
+            Tick = 37, // due day; treasury cannot deliver until the next tick
             Actors = actors,
             Assignments = ImmutableArray.Create(
-                new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.TreasuryNodeId)),
+                new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.PayrollNodeId)),
             PortSignals = ImmutableDictionary<PortKey, SignalValue>.Empty.Add(
                 new PortKey(MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId),
-                new SignalValue.Money(5)),
-            PendingMoneyMoves = ImmutableArray.Create(
-                new PendingMoneyMove(MoneyMoveDirection.Out, 10)),
+                new SignalValue.Money(100)),
+            ActivePayrollRun = new PayrollRun(
+                0,
+                obligations,
+                ImmutableHashSet<ActorId>.Empty,
+                AttemptSubmitted: false),
         };
 
         var next = ProductionTick.AdvanceTick(state);
 
-        Assert.Empty(next.Actors);
-        Assert.Empty(next.Assignments);
+        Assert.Null(next.ActivePayrollRun);
+        Assert.False(next.Actors.ContainsKey(MagicAgencySeed.ActorId));
         Assert.Empty(next.PendingMoneyMoves);
-        Assert.Equal(
-            new SignalValue.Money(5),
-            Signal(next, MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId));
     }
 
     [Fact]
@@ -805,6 +958,7 @@ public sealed class MagicAgencyProductionTests
             .Where(kv => kv.Key.Value != "treasury-to-payroll")
             .ToImmutableDictionary();
 
+        var obligations = ImmutableArray.Create(new PayrollObligation(MagicAgencySeed.ActorId, 10));
         var state = seeded with
         {
             Actors = actors,
@@ -814,9 +968,11 @@ public sealed class MagicAgencyProductionTests
             PortSignals = ImmutableDictionary<PortKey, SignalValue>.Empty.Add(
                 new PortKey(MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId),
                 new SignalValue.Money(100)),
-            NodeTimers = ImmutableDictionary<NodeId, int>.Empty.Add(
-                MagicAgencySeed.PayrollNodeId,
-                5),
+            ActivePayrollRun = new PayrollRun(
+                0,
+                obligations,
+                ImmutableHashSet<ActorId>.Empty,
+                AttemptSubmitted: false),
         };
 
         var ex = Assert.Throws<InvalidOperationException>(() => ProductionTick.AdvanceTick(state));
@@ -834,6 +990,7 @@ public sealed class MagicAgencyProductionTests
                 ImmutableDictionary<string, double>.Empty.Add(ActorStatKeys.Payroll, 5),
                 Wage: 7));
 
+        var obligations = ImmutableArray.Create(new PayrollObligation(MagicAgencySeed.ActorId, 7));
         var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors) with
         {
             Actors = actors,
@@ -842,16 +999,18 @@ public sealed class MagicAgencyProductionTests
             PortSignals = ImmutableDictionary<PortKey, SignalValue>.Empty.Add(
                 new PortKey(MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId),
                 new SignalValue.Money(100)),
-            NodeTimers = ImmutableDictionary<NodeId, int>.Empty.Add(
-                MagicAgencySeed.PayrollNodeId,
-                5),
+            ActivePayrollRun = new PayrollRun(
+                0,
+                obligations,
+                ImmutableHashSet<ActorId>.Empty,
+                AttemptSubmitted: false),
         };
 
         var next = ProductionTick.AdvanceTick(state);
 
         Assert.Single(next.PendingMoneyMoves);
         Assert.Equal(7, next.PendingMoneyMoves[0].Amount);
-        Assert.Equal(0, next.NodeTimers[MagicAgencySeed.PayrollNodeId]);
+        Assert.True(next.ActivePayrollRun!.AttemptSubmitted);
         Assert.Equal(0, next.NodeProgress.GetValueOrDefault(MagicAgencySeed.PayrollNodeId, 0));
     }
 
@@ -866,6 +1025,7 @@ public sealed class MagicAgencyProductionTests
                 ImmutableDictionary<string, double>.Empty.Add(ActorStatKeys.Payroll, 10),
                 Wage: 10));
 
+        var obligations = ImmutableArray.Create(new PayrollObligation(MagicAgencySeed.ActorId, 10));
         var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors) with
         {
             Actors = actors,
@@ -874,9 +1034,11 @@ public sealed class MagicAgencyProductionTests
             PortSignals = ImmutableDictionary<PortKey, SignalValue>.Empty.Add(
                 new PortKey(MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId),
                 new SignalValue.Money(100)),
-            NodeTimers = ImmutableDictionary<NodeId, int>.Empty.Add(
-                MagicAgencySeed.PayrollNodeId,
-                DefaultConfigs.Payroll.Period),
+            ActivePayrollRun = new PayrollRun(
+                0,
+                obligations,
+                ImmutableHashSet<ActorId>.Empty,
+                AttemptSubmitted: false),
             NodeProgress = ImmutableDictionary<NodeId, double>.Empty.Add(
                 MagicAgencySeed.PayrollNodeId,
                 3),
@@ -885,7 +1047,7 @@ public sealed class MagicAgencyProductionTests
         var next = ProductionTick.AdvanceTick(state);
 
         Assert.Single(next.PendingMoneyMoves);
-        Assert.Equal(0, next.NodeTimers[MagicAgencySeed.PayrollNodeId]);
+        Assert.True(next.ActivePayrollRun!.AttemptSubmitted);
         Assert.Equal(0, next.NodeProgress.GetValueOrDefault(MagicAgencySeed.PayrollNodeId, 0));
     }
 
@@ -901,38 +1063,33 @@ public sealed class MagicAgencyProductionTests
 
         var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors) with
         {
+            Tick = 27,
             Actors = actors,
             Assignments = ImmutableArray.Create(
                 new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.PayrollNodeId)),
             PortSignals = ImmutableDictionary<PortKey, SignalValue>.Empty.Add(
                 new PortKey(MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId),
                 new SignalValue.Money(100)),
-            NodeTimers = ImmutableDictionary<NodeId, int>.Empty.Add(
-                MagicAgencySeed.PayrollNodeId,
-                DefaultConfigs.Payroll.Period),
         };
 
         var next = ProductionTick.AdvanceTick(state);
 
         Assert.Empty(next.PendingMoneyMoves);
-        Assert.Equal(0, next.NodeTimers[MagicAgencySeed.PayrollNodeId]);
+        Assert.NotNull(next.ActivePayrollRun);
+        Assert.Empty(next.ActivePayrollRun!.Obligations);
+        Assert.True(next.ActivePayrollRun.AttemptSubmitted);
         Assert.Equal(0, next.NodeProgress.GetValueOrDefault(MagicAgencySeed.PayrollNodeId, 0));
         Assert.Equal(1, next.NodeCycles.GetValueOrDefault(MagicAgencySeed.PayrollNodeId, 0));
     }
 
     [Fact]
-    public void Payday_EffectiveEffortScalesWithPaidActorCount()
+    public void Payday_EffectiveEffortScalesWithObligationCount()
     {
         var workerId = MagicAgencySeed.ActorId;
         var bossId = MagicAgencySeed.BossActorId;
         var unpaidId = new ActorId("unpaid");
 
-        // baseEffort 1 + perActorEffort 1 × 2 paid = 3 required; progress start 0 + gain 2.5 → under effort.
-        var configs = DefaultConfigs with
-        {
-            Payroll = new PayrollNodeConfig(Period: 5, BaseEffort: 1, PerActorEffort: 1),
-        };
-
+        // baseEffort 1 + perActorEffort 1 × 2 obligations = 3 required; progress start 0 + gain 2.5 → under effort.
         var actors = ImmutableDictionary<ActorId, Actor>.Empty
             .Add(
                 workerId,
@@ -955,7 +1112,11 @@ public sealed class MagicAgencyProductionTests
                     Capacity: 1.0m,
                     ImmutableDictionary<string, double>.Empty));
 
-        var underEffort = MagicAgencySeed.CreateInitialState(configs, DefaultActors) with
+        var obligations = ImmutableArray.Create(
+            new PayrollObligation(workerId, 7),
+            new PayrollObligation(bossId, 3));
+
+        var underEffort = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors) with
         {
             Actors = actors,
             Assignments = ImmutableArray.Create(
@@ -963,15 +1124,17 @@ public sealed class MagicAgencyProductionTests
             PortSignals = ImmutableDictionary<PortKey, SignalValue>.Empty.Add(
                 new PortKey(MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId),
                 new SignalValue.Money(100)),
-            NodeTimers = ImmutableDictionary<NodeId, int>.Empty.Add(
-                MagicAgencySeed.PayrollNodeId,
-                configs.Payroll.Period),
+            ActivePayrollRun = new PayrollRun(
+                0,
+                obligations,
+                ImmutableHashSet<ActorId>.Empty,
+                AttemptSubmitted: false),
         };
 
         var afterUnder = ProductionTick.AdvanceTick(underEffort);
         Assert.Empty(afterUnder.PendingMoneyMoves);
         Assert.Equal(2.5, afterUnder.NodeProgress[MagicAgencySeed.PayrollNodeId]);
-        Assert.Equal(configs.Payroll.Period, afterUnder.NodeTimers[MagicAgencySeed.PayrollNodeId]);
+        Assert.False(afterUnder.ActivePayrollRun!.AttemptSubmitted);
 
         // Same roster, higher payroll stat so gain covers effective effort 3.
         var paidEnough = underEffort with
@@ -988,8 +1151,44 @@ public sealed class MagicAgencyProductionTests
         var afterPayday = ProductionTick.AdvanceTick(paidEnough);
         Assert.Single(afterPayday.PendingMoneyMoves);
         Assert.Equal(10, afterPayday.PendingMoneyMoves[0].Amount);
-        Assert.Equal(0, afterPayday.NodeTimers[MagicAgencySeed.PayrollNodeId]);
+        Assert.True(afterPayday.ActivePayrollRun!.AttemptSubmitted);
         Assert.Equal(0, afterPayday.NodeProgress.GetValueOrDefault(MagicAgencySeed.PayrollNodeId, 0));
+    }
+
+    [Fact]
+    public void Payday_OneAttemptOnly_SecondTickDoesNotReenqueue()
+    {
+        var actors = ImmutableDictionary<ActorId, Actor>.Empty.Add(
+            MagicAgencySeed.ActorId,
+            new Actor(
+                MagicAgencySeed.ActorId,
+                Capacity: 1.0m,
+                ImmutableDictionary<string, double>.Empty.Add(ActorStatKeys.Payroll, 5),
+                Wage: 10));
+
+        var obligations = ImmutableArray.Create(new PayrollObligation(MagicAgencySeed.ActorId, 10));
+        var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors) with
+        {
+            Tick = 27,
+            Actors = actors,
+            Assignments = ImmutableArray.Create(
+                new Assignment(MagicAgencySeed.ActorId, MagicAgencySeed.PayrollNodeId)),
+            PortSignals = ImmutableDictionary<PortKey, SignalValue>.Empty.Add(
+                new PortKey(MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId),
+                new SignalValue.Money(100)),
+            ActivePayrollRun = new PayrollRun(
+                0,
+                obligations,
+                ImmutableHashSet<ActorId>.Empty,
+                AttemptSubmitted: false),
+        };
+
+        var afterFirst = ProductionTick.AdvanceTick(state);
+        Assert.Single(afterFirst.PendingMoneyMoves);
+
+        var afterSecond = ProductionTick.AdvanceTick(afterFirst);
+        Assert.Single(afterSecond.PendingMoneyMoves);
+        Assert.True(afterSecond.ActivePayrollRun!.AttemptSubmitted);
     }
 
     [Fact]
@@ -1062,32 +1261,50 @@ public sealed class MagicAgencyProductionTests
         Assert.Equal(1, loaded.Merge.Effort);
         Assert.Equal(10, loaded.Sell.Effort);
         Assert.Equal(1, loaded.Treasury.Effort);
-        Assert.Equal(5, loaded.Payroll.Period);
+        Assert.Equal("month", loaded.Payroll.Schedule.PeriodUnit);
+        Assert.Equal("day", loaded.Payroll.Schedule.PositionUnit);
+        Assert.Equal(0, loaded.Payroll.Schedule.StartLead);
+        Assert.Equal(10, loaded.Payroll.Schedule.DueDay);
         Assert.Equal(1, loaded.Payroll.BaseEffort);
         Assert.Equal(1, loaded.Payroll.PerActorEffort);
     }
 
     [Fact]
-    public void ActorConfigLoader_LoadsInternWithStatsAndNoWage()
+    public void ActorConfigLoader_LoadsInternWithStatsAndWage()
     {
         var actors = ActorConfigLoader.LoadFromBaseDirectory();
         var intern = actors[MagicAgencySeed.ActorId];
         Assert.Equal(1.0m, intern.Capacity);
-        Assert.Null(intern.Wage);
+        Assert.Equal(2, intern.Wage);
         Assert.Equal(10, intern.Stats[ActorStatKeys.Enchanting]);
         Assert.Equal(10, intern.Stats[ActorStatKeys.Sales]);
     }
 
     [Fact]
-    public void ActorConfigLoader_LoadsBossWithStatsAndNoWage()
+    public void ActorConfigLoader_LoadsBossWithStatsAndWage()
     {
         var actors = ActorConfigLoader.LoadFromBaseDirectory();
         var boss = actors[MagicAgencySeed.BossActorId];
         Assert.Equal(1.0m, boss.Capacity);
-        Assert.Null(boss.Wage);
+        Assert.Equal(3, boss.Wage);
         Assert.Equal(10, boss.Stats[ActorStatKeys.Sales]);
         Assert.Equal(10, boss.Stats[ActorStatKeys.Payroll]);
         Assert.Equal(10, boss.Stats[ActorStatKeys.Treasury]);
+    }
+
+    [Fact]
+    public void ActorConfigLoader_EveryPoolActorHasAWage()
+    {
+        var actors = ActorConfigLoader.LoadFromBaseDirectory();
+        var pool = ActorPoolLoader.LoadFromBaseDirectory();
+
+        Assert.NotEmpty(pool);
+        foreach (var actorId in pool)
+        {
+            Assert.True(
+                actors[actorId].Wage is > 0,
+                $"Actor '{actorId.Value}' must define a positive wage to participate in payroll.");
+        }
     }
 
     [Fact]

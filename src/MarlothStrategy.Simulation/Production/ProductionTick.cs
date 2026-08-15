@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using MarlothStrategy.Simulation.Graph;
+using MarlothStrategy.Simulation.Time;
 
 namespace MarlothStrategy.Simulation.Production;
 
@@ -54,34 +55,46 @@ public static class ProductionTick
         ArgumentNullException.ThrowIfNull(nodeOrder);
 
         var reportOrder = nodeOrder as IReadOnlyList<NodeId> ?? nodeOrder.ToArray();
-        var resolvedInputs = ResolveInputs(state, OrderNodes(state.Graph.Nodes.Keys));
-        var effortByNode = ResolveEffortByNode(state, resolvedInputs);
+        var opened = OpenPayrollRunIfDue(state);
+        EnsureSinglePayrollAndTreasury(opened);
+        var resolvedInputs = ResolveInputs(opened, OrderNodes(opened.Graph.Nodes.Keys));
+        var effortByNode = ResolveEffortByNode(opened, resolvedInputs);
         var computed = ComputeOutputs(
-            state,
+            opened,
             reportOrder,
             resolvedInputs,
             effortByNode);
         var blocks = computed.EnchantmentBlocks.ToBuilder();
         var (nextSignals, pendingAfterCommit) = CommitSignals(
-            state,
+            opened,
             computed.Residuals,
             computed.Outputs,
             computed.PendingMoves,
             blocks);
-        var nextTimers = AdvancePayrollTimer(state, computed.NextTimers);
+        var nextTick = opened.Tick + 1;
+        var closed = ClosePayrollIfPastDue(
+            opened.NodeConfigs.Payroll.Schedule,
+            opened.TimePartitions,
+            computed.ActivePayrollRun,
+            computed.NextActors,
+            computed.NextAssignments,
+            pendingAfterCommit,
+            nextTick);
 
-        var nextState = state with
+        var nextState = opened with
         {
             PortSignals = nextSignals,
             NodeProgress = computed.NextProgress,
-            NodeTimers = nextTimers,
+            NodeTimers = computed.NextTimers,
             NodeCycles = computed.NextCycles,
-            PendingMoneyMoves = pendingAfterCommit,
-            Actors = computed.NextActors,
-            Assignments = computed.NextAssignments,
+            PendingMoneyMoves = closed.PendingMoves,
+            Actors = closed.Actors,
+            Assignments = closed.Assignments,
+            ActivePayrollRun = closed.ActivePayrollRun,
+            PortFlowTotals = computed.NextPortFlowTotals,
             EnchantmentBlocks = blocks.ToImmutable(),
             NextUnitId = computed.NextUnitId,
-            Tick = state.Tick + 1,
+            Tick = nextTick,
         };
 
         return new ProductionTickResult(nextState, computed.Rows);
@@ -264,8 +277,7 @@ public static class ProductionTick
 
         if (node.Type == MagicAgencySeed.PayrollTypeId)
         {
-            var period = state.NodeConfigs.Payroll.Period;
-            return state.NodeTimers.GetValueOrDefault(nodeId, 0) >= period;
+            return state.ActivePayrollRun is { AttemptSubmitted: false };
         }
 
         return false;
@@ -307,6 +319,8 @@ public static class ProductionTick
         ImmutableArray<PendingMoneyMove> PendingMoves,
         ImmutableDictionary<ActorId, Actor> NextActors,
         ImmutableArray<Assignment> NextAssignments,
+        PayrollRun? ActivePayrollRun,
+        ImmutableDictionary<PortKey, double> NextPortFlowTotals,
         ImmutableDictionary<string, EnchantmentBlock> EnchantmentBlocks,
         ulong NextUnitId);
 
@@ -344,6 +358,8 @@ public static class ProductionTick
         var nextActors = state.Actors;
         var nextAssignments = state.Assignments;
         var nextTimers = state.NodeTimers;
+        var nextPayrollRun = state.ActivePayrollRun;
+        var flowTotals = state.PortFlowTotals.ToBuilder();
         var scratch = new BlockScratch(state);
 
         foreach (var nodeId in OrderNodes(state.Graph.Nodes.Keys))
@@ -432,7 +448,8 @@ public static class ProductionTick
                     progress,
                     resolvedInputs,
                     residuals,
-                    outputs);
+                    outputs,
+                    flowTotals);
                 rowByNode[nodeId] = applied.Row;
                 nextProgress[nodeId] = applied.Progress;
                 nextCycles[nodeId] = priorCycles + applied.Applications;
@@ -450,12 +467,14 @@ public static class ProductionTick
                     outputs,
                     remainingStartPending,
                     nextActors,
-                    nextAssignments);
+                    nextAssignments,
+                    nextPayrollRun);
                 nextProgress[nodeId] = applied.Progress;
                 nextCycles[nodeId] = priorCycles + applied.Applications;
                 remainingStartPending = applied.PendingMoves;
                 nextActors = applied.Actors;
                 nextAssignments = applied.Assignments;
+                nextPayrollRun = applied.ActivePayrollRun;
             }
             else if (node.Type == MagicAgencySeed.PayrollTypeId)
             {
@@ -467,11 +486,12 @@ public static class ProductionTick
                     progress,
                     resolvedInputs,
                     appendedPending,
-                    nextTimers);
+                    nextPayrollRun,
+                    flowTotals);
                 nextProgress[nodeId] = applied.Progress;
                 nextCycles[nodeId] = priorCycles + applied.Applications;
                 appendedPending = applied.PendingMoves;
-                nextTimers = applied.Timers;
+                nextPayrollRun = applied.ActivePayrollRun;
             }
             else
             {
@@ -515,8 +535,23 @@ public static class ProductionTick
             pending,
             nextActors,
             nextAssignments,
+            nextPayrollRun,
+            flowTotals.ToImmutable(),
             scratch.Blocks.ToImmutable(),
             scratch.NextUnitId);
+    }
+
+    private static void AddFlow(
+        ImmutableDictionary<PortKey, double>.Builder flowTotals,
+        PortKey key,
+        double amount)
+    {
+        if (amount == 0)
+        {
+            return;
+        }
+
+        flowTotals[key] = flowTotals.GetValueOrDefault(key) + amount;
     }
 
     private readonly record struct AppliedDraft(NodeIoRow Row, double Progress, int Applications = 0);
@@ -938,7 +973,8 @@ public static class ProductionTick
         double progress,
         ImmutableDictionary<PortKey, SignalValue> resolvedInputs,
         ImmutableDictionary<PortKey, SignalValue>.Builder residuals,
-        ImmutableDictionary<PortKey, SignalValue>.Builder outputs)
+        ImmutableDictionary<PortKey, SignalValue>.Builder outputs,
+        ImmutableDictionary<PortKey, double>.Builder flowTotals)
     {
         var enchantmentPort = MagicAgencySeed.EnchantmentPortId;
         var moneyPort = MagicAgencySeed.MoneyPortId;
@@ -976,6 +1012,7 @@ public static class ProductionTick
         {
             var produced = new SignalValue.Money(toSell.SellPayout(config));
             outputs[moneyOutputKey] = produced;
+            AddFlow(flowTotals, moneyOutputKey, produced.Amount);
             return new AppliedDraft(
                 new NodeIoRow(
                     nodeId,
@@ -1017,6 +1054,7 @@ public static class ProductionTick
         ImmutableArray<PendingMoneyMove> PendingMoves,
         ImmutableDictionary<ActorId, Actor> Actors,
         ImmutableArray<Assignment> Assignments,
+        PayrollRun? ActivePayrollRun,
         int Applications);
 
     private static TreasuryApplied ApplyTreasury(
@@ -1030,7 +1068,8 @@ public static class ProductionTick
         ImmutableDictionary<PortKey, SignalValue>.Builder outputs,
         ImmutableArray<PendingMoneyMove> pending,
         ImmutableDictionary<ActorId, Actor> actors,
-        ImmutableArray<Assignment> assignments)
+        ImmutableArray<Assignment> assignments,
+        PayrollRun? activePayrollRun)
     {
         var moneyKey = new PortKey(nodeId, MagicAgencySeed.MoneyPortId);
         var pileAmount = 0.0;
@@ -1045,6 +1084,7 @@ public static class ProductionTick
         var nextProgress = progress;
         var nextActors = actors;
         var nextAssignments = assignments;
+        var nextPayrollRun = activePayrollRun;
         var emittedOut = 0.0;
         var applications = 0;
 
@@ -1071,16 +1111,10 @@ public static class ProductionTick
                 }
                 else
                 {
-                    if (pileAmount >= move.Amount)
-                    {
-                        pileAmount -= move.Amount;
-                        emittedOut += move.Amount;
-                    }
-                    else
-                    {
-                        nextActors = ImmutableDictionary<ActorId, Actor>.Empty;
-                        nextAssignments = ImmutableArray<Assignment>.Empty;
-                    }
+                    var settlement = SettleOutboundMove(move, pileAmount, nextPayrollRun);
+                    pileAmount = settlement.PileAmount;
+                    emittedOut += settlement.Emitted;
+                    nextPayrollRun = settlement.ActivePayrollRun;
                 }
             }
 
@@ -1097,13 +1131,85 @@ public static class ProductionTick
             outputs[moneyKey] = new SignalValue.Money(emittedOut);
         }
 
-        return new TreasuryApplied(nextProgress, nextPending, nextActors, nextAssignments, applications);
+        return new TreasuryApplied(
+            nextProgress,
+            nextPending,
+            nextActors,
+            nextAssignments,
+            nextPayrollRun,
+            applications);
+    }
+
+    private readonly record struct OutboundSettlement(
+        double PileAmount,
+        double Emitted,
+        PayrollRun? ActivePayrollRun);
+
+    private static OutboundSettlement SettleOutboundMove(
+        PendingMoneyMove move,
+        double pileAmount,
+        PayrollRun? activePayrollRun)
+    {
+        if (move.Payees is { Length: > 0 } payees
+            && move.PayrollRunPeriodIndex is int runIndex
+            && activePayrollRun is { PeriodIndex: var periodIndex }
+            && periodIndex == runIndex)
+        {
+            var unpaid = payees
+                .Where(o => !activePayrollRun.PaidActorIds.Contains(o.ActorId))
+                .ToList();
+            ShuffleDeterministically(unpaid, runIndex);
+
+            var paidIds = new List<ActorId>();
+            var paidSum = 0.0;
+            foreach (var obligation in unpaid)
+            {
+                if (pileAmount >= paidSum + obligation.Wage)
+                {
+                    paidSum += obligation.Wage;
+                    paidIds.Add(obligation.ActorId);
+                }
+            }
+
+            if (paidSum > 0)
+            {
+                return new OutboundSettlement(
+                    pileAmount - paidSum,
+                    paidSum,
+                    activePayrollRun.WithPaid(paidIds));
+            }
+
+            return new OutboundSettlement(pileAmount, 0, activePayrollRun);
+        }
+
+        if (pileAmount >= move.Amount)
+        {
+            return new OutboundSettlement(pileAmount - move.Amount, move.Amount, activePayrollRun);
+        }
+
+        return new OutboundSettlement(pileAmount, 0, activePayrollRun);
+    }
+
+    private static void ShuffleDeterministically(List<PayrollObligation> items, int runPeriodIndex)
+    {
+        var seed = unchecked(runPeriodIndex * 397);
+        foreach (var item in items)
+        {
+            seed = unchecked(seed * 31 + StringComparer.Ordinal.GetHashCode(item.ActorId.Value));
+        }
+
+        var rng = new Random(seed);
+        for (var i = items.Count - 1; i > 0; i--)
+        {
+            var j = rng.Next(i + 1);
+            (items[i], items[j]) = (items[j], items[i]);
+        }
     }
 
     private sealed record PayrollApplied(
         double Progress,
         ImmutableArray<PendingMoneyMove> PendingMoves,
-        ImmutableDictionary<NodeId, int> Timers,
+        PayrollRun? ActivePayrollRun,
         int Applications);
 
     private static PayrollApplied ApplyPayroll(
@@ -1114,17 +1220,23 @@ public static class ProductionTick
         double progress,
         ImmutableDictionary<PortKey, SignalValue> resolvedInputs,
         ImmutableArray<PendingMoneyMove> appendedPending,
-        ImmutableDictionary<NodeId, int> timers)
+        PayrollRun? activePayrollRun,
+        ImmutableDictionary<PortKey, double>.Builder flowTotals)
     {
         // Money on the payroll input is disbursed: never written to residuals.
-        var elapsed = state.NodeTimers.GetValueOrDefault(nodeId, 0);
+        var moneyKey = new PortKey(nodeId, MagicAgencySeed.MoneyPortId);
+        if (resolvedInputs.TryGetValue(moneyKey, out var delivered)
+            && delivered is SignalValue.Money wages)
+        {
+            AddFlow(flowTotals, moneyKey, -wages.Amount);
+        }
+
         var nextProgress = progress;
         var nextPending = appendedPending;
-        var nextTimers = timers;
+        var nextPayrollRun = activePayrollRun;
         var applications = 0;
 
-        // Payday due only when start-of-tick elapsed has reached period.
-        if (elapsed >= config.Period && assignmentEffort > 0m)
+        if (activePayrollRun is { AttemptSubmitted: false } run && assignmentEffort > 0m)
         {
             nextProgress += ProgressGain(
                 state,
@@ -1133,20 +1245,15 @@ public static class ProductionTick
                 ActorStatKeys.Payroll,
                 ActorStatKeys.DefaultPayroll);
 
-            var paidActors = PaidActors(state).ToList();
-            var paidActorCount = paidActors.Count;
-            var effectiveEffort = EffectivePayrollEffort(config, paidActorCount);
+            var obligationCount = run.Obligations.Length;
+            var effectiveEffort = EffectivePayrollEffort(config, obligationCount);
 
             if (effectiveEffort > 0 && nextProgress >= effectiveEffort)
             {
-                // One payday per due period: clear progress so excess gain does not carry.
+                // One attempt per run: clear progress so excess gain does not carry.
                 nextProgress = 0;
                 applications = 1;
-                var wageTotal = 0.0;
-                foreach (var actor in paidActors)
-                {
-                    wageTotal += actor.Wage!.Value;
-                }
+                var wageTotal = run.WageTotal();
 
                 if (wageTotal > 0)
                 {
@@ -1157,14 +1264,19 @@ public static class ProductionTick
                             $"from a treasury money port to its money input.");
                     }
 
-                    nextPending = nextPending.Add(new PendingMoneyMove(MoneyMoveDirection.Out, wageTotal));
+                    nextPending = nextPending.Add(
+                        new PendingMoneyMove(
+                            MoneyMoveDirection.Out,
+                            wageTotal,
+                            run.PeriodIndex,
+                            run.Obligations));
                 }
 
-                nextTimers = nextTimers.SetItem(nodeId, 0);
+                nextPayrollRun = run.WithAttemptSubmitted();
             }
         }
 
-        return new PayrollApplied(nextProgress, nextPending, nextTimers, applications);
+        return new PayrollApplied(nextProgress, nextPending, nextPayrollRun, applications);
     }
 
     /// <summary>
@@ -1275,9 +1387,96 @@ public static class ProductionTick
         return (next.ToImmutable(), nextPending);
     }
 
-    private static ImmutableDictionary<NodeId, int> AdvancePayrollTimer(
-        GameState state,
-        ImmutableDictionary<NodeId, int> timersAfterCompute)
+    private static GameState OpenPayrollRunIfDue(GameState state)
+    {
+        if (state.ActivePayrollRun is not null)
+        {
+            return state;
+        }
+
+        var schedule = state.NodeConfigs.Payroll.Schedule;
+        var calendar = state.TimePartitions;
+        var positionsPerPeriod =
+            calendar.TicksPer(schedule.PeriodUnit) / calendar.TicksPer(schedule.PositionUnit);
+        var startDay = positionsPerPeriod - schedule.StartLead;
+        if (calendar.PositionWithin(schedule.PositionUnit, schedule.PeriodUnit, state.Tick) != startDay)
+        {
+            return state;
+        }
+
+        var obligations = PaidActors(state)
+            .Select(actor => new PayrollObligation(actor.Id, actor.Wage!.Value))
+            .ToImmutableArray();
+        var periodIndex = calendar.AbsoluteIndex(schedule.PeriodUnit, state.Tick);
+        return state with
+        {
+            ActivePayrollRun = new PayrollRun(
+                periodIndex,
+                obligations,
+                ImmutableHashSet<ActorId>.Empty,
+                AttemptSubmitted: false),
+        };
+    }
+
+    private sealed record PayrollCloseResult(
+        ImmutableDictionary<ActorId, Actor> Actors,
+        ImmutableArray<Assignment> Assignments,
+        ImmutableArray<PendingMoneyMove> PendingMoves,
+        PayrollRun? ActivePayrollRun);
+
+    private static PayrollCloseResult ClosePayrollIfPastDue(
+        PayrollScheduleConfig schedule,
+        TimePartitionConfig calendar,
+        PayrollRun? activePayrollRun,
+        ImmutableDictionary<ActorId, Actor> actors,
+        ImmutableArray<Assignment> assignments,
+        ImmutableArray<PendingMoneyMove> pendingMoves,
+        int nextTick)
+    {
+        if (activePayrollRun is null ||
+            !IsPastPayrollDeadline(schedule, calendar, activePayrollRun, nextTick))
+        {
+            return new PayrollCloseResult(actors, assignments, pendingMoves, activePayrollRun);
+        }
+
+        var unpaid = activePayrollRun.UnpaidObligations()
+            .Select(o => o.ActorId)
+            .ToImmutableHashSet();
+        var nextActors = actors
+            .Where(kv => !unpaid.Contains(kv.Key))
+            .ToImmutableDictionary();
+        var nextAssignments = assignments
+            .Where(a => !unpaid.Contains(a.ActorId))
+            .ToImmutableArray();
+        var nextPending = pendingMoves
+            .Where(m => m.PayrollRunPeriodIndex != activePayrollRun.PeriodIndex)
+            .ToImmutableArray();
+        return new PayrollCloseResult(nextActors, nextAssignments, nextPending, null);
+    }
+
+    private static bool IsPastPayrollDeadline(
+        PayrollScheduleConfig schedule,
+        TimePartitionConfig calendar,
+        PayrollRun run,
+        int tick)
+    {
+        var duePeriod = run.PeriodIndex + 1;
+        var periodIndex = calendar.AbsoluteIndex(schedule.PeriodUnit, tick);
+        if (periodIndex < duePeriod)
+        {
+            return false;
+        }
+
+        if (periodIndex > duePeriod)
+        {
+            return true;
+        }
+
+        return calendar.PositionWithin(schedule.PositionUnit, schedule.PeriodUnit, tick)
+            > schedule.DueDay;
+    }
+
+    private static void EnsureSinglePayrollAndTreasury(GameState state)
     {
         var payrollNodes = state.Graph.Nodes
             .Where(kv => kv.Value.Type == MagicAgencySeed.PayrollTypeId)
@@ -1301,23 +1500,6 @@ public static class ProductionTick
             throw new InvalidOperationException(
                 $"Expected exactly one treasury node, found {treasuryNodes.Length}.");
         }
-
-        var payrollNodeId = payrollNodes[0];
-        var period = state.NodeConfigs.Payroll.Period;
-        if (period <= 0)
-        {
-            throw new InvalidOperationException("Payroll period must be a positive integer.");
-        }
-
-        var startElapsed = state.NodeTimers.GetValueOrDefault(payrollNodeId, 0);
-        if (startElapsed < period)
-        {
-            // Count-up ticks without actors; payday reset (if any) is ignored when not due.
-            return timersAfterCompute.SetItem(payrollNodeId, startElapsed + 1);
-        }
-
-        // Still due (elapsed >= period) or reset to 0 by payday application this tick.
-        return timersAfterCompute;
     }
 
     private static void ValidateDestinationType(

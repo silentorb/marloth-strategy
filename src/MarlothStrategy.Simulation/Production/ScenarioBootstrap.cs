@@ -94,17 +94,13 @@ public static class ScenarioBootstrap
         ArgumentNullException.ThrowIfNull(actors);
         ArgumentNullException.ThrowIfNull(timePartitions);
 
-        if (nodeConfigs.Payroll.Period <= 0)
-        {
-            throw new InvalidOperationException(
-                "Payroll period must be a positive integer.");
-        }
-
         if (spec.IncludeTesting && spec.IncludeDesign)
         {
             throw new InvalidOperationException(
                 "Scenario cannot include both testing and design.");
         }
+
+        ValidatePayrollSchedule(nodeConfigs.Payroll.Schedule, timePartitions);
 
         var (graph, catalog) = GraphFactory.Create(spec.IncludeTesting, spec.IncludeDesign);
 
@@ -166,9 +162,6 @@ public static class ScenarioBootstrap
                 new PortKey(MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId),
                 new SignalValue.Money(StartingTreasuryMoney));
 
-        var timers = ImmutableDictionary<NodeId, int>.Empty
-            .Add(MagicAgencySeed.PayrollNodeId, 0);
-
         var blocks = ImmutableDictionary<string, EnchantmentBlock>.Empty
             .Add(genesis.Hash, genesis);
 
@@ -180,12 +173,65 @@ public static class ScenarioBootstrap
             spec.Assignments,
             nodeConfigs,
             ImmutableDictionary<NodeId, double>.Empty,
-            timers,
+            ImmutableDictionary<NodeId, int>.Empty,
             ImmutableDictionary<NodeId, int>.Empty,
             ImmutableArray<PendingMoneyMove>.Empty,
             blocks,
             NextUnitId: 1,
             Tick: 0,
-            timePartitions);
+            timePartitions,
+            ActivePayrollRun: null);
+    }
+
+    internal static void ValidatePayrollSchedule(
+        PayrollScheduleConfig schedule,
+        TimePartitionConfig timePartitions)
+    {
+        ArgumentNullException.ThrowIfNull(schedule);
+        ArgumentNullException.ThrowIfNull(timePartitions);
+
+        if (string.IsNullOrWhiteSpace(schedule.PeriodUnit))
+        {
+            throw new InvalidOperationException("Payroll schedule periodUnit is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(schedule.PositionUnit))
+        {
+            throw new InvalidOperationException("Payroll schedule positionUnit is required.");
+        }
+
+        if (schedule.StartLead < 0)
+        {
+            throw new InvalidOperationException("Payroll schedule startLead must be non-negative.");
+        }
+
+        if (schedule.DueDay <= 0)
+        {
+            throw new InvalidOperationException("Payroll schedule dueDay must be a positive integer.");
+        }
+
+        var periodTicks = timePartitions.TicksPer(schedule.PeriodUnit);
+        var positionTicks = timePartitions.TicksPer(schedule.PositionUnit);
+        if (periodTicks % positionTicks != 0)
+        {
+            throw new InvalidOperationException(
+                $"Payroll schedule periodUnit '{schedule.PeriodUnit}' duration {periodTicks} " +
+                $"is not a multiple of positionUnit '{schedule.PositionUnit}' duration {positionTicks}.");
+        }
+
+        var positionsPerPeriod = periodTicks / positionTicks;
+        if (schedule.StartLead >= positionsPerPeriod)
+        {
+            throw new InvalidOperationException(
+                $"Payroll schedule startLead {schedule.StartLead} must be less than " +
+                $"{positionsPerPeriod} {schedule.PositionUnit}s per {schedule.PeriodUnit}.");
+        }
+
+        if (schedule.DueDay > positionsPerPeriod)
+        {
+            throw new InvalidOperationException(
+                $"Payroll schedule dueDay {schedule.DueDay} must be at most " +
+                $"{positionsPerPeriod} {schedule.PositionUnit}s per {schedule.PeriodUnit}.");
+        }
     }
 }

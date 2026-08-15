@@ -17,7 +17,7 @@ public sealed class TimePartitionProgressionTests
         new TestingNodeConfig(Effort: 10, FallacyReduction: 5),
         new SellNodeConfig(Effort: 10, PayoutFloor: 0),
         new TreasuryNodeConfig(Effort: 1),
-        new PayrollNodeConfig(Period: 5, BaseEffort: 1, PerActorEffort: 1),
+        new PayrollNodeConfig(new PayrollScheduleConfig("month", "day", 0, 10), BaseEffort: 1, PerActorEffort: 1),
         new MergeNodeConfig(Effort: 1),
         new DesignNodeConfig(Effort: 3, DesignDelta: 1, DarknessReduction: 0.9));
 
@@ -75,13 +75,18 @@ public sealed class TimePartitionProgressionTests
     }
 
     [Fact]
-    public void AdvanceTicks_RunsPayrollTimerEachContainedTick()
+    public void AdvanceTicks_OpensPayrollRunOnLastDayOfMonth()
     {
         var start = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors);
-        var after = ProductionTick.AdvanceTicks(start, 5);
+        var before = ProductionTick.AdvanceTicks(start, 27);
+        Assert.Equal(27, before.Tick);
+        Assert.Null(before.ActivePayrollRun);
 
-        Assert.Equal(5, after.Tick);
-        Assert.Equal(5, after.NodeTimers[MagicAgencySeed.PayrollNodeId]);
+        var after = ProductionTick.AdvanceTick(before);
+        Assert.Equal(28, after.Tick);
+        Assert.NotNull(after.ActivePayrollRun);
+        Assert.Equal(0, after.ActivePayrollRun!.PeriodIndex);
+        Assert.Empty(after.ActivePayrollRun.Obligations);
     }
 
     [Fact]
@@ -121,6 +126,10 @@ public sealed class TimePartitionProgressionTests
             expected.NodeProgress.OrderBy(kv => kv.Key.Value).ToArray(),
             actual.NodeProgress.OrderBy(kv => kv.Key.Value).ToArray());
         Assert.Equal(expected.PendingMoneyMoves.ToArray(), actual.PendingMoneyMoves.ToArray());
+        Assert.Equal(expected.ActivePayrollRun, actual.ActivePayrollRun);
+        Assert.Equal(
+            expected.PortFlowTotals.OrderBy(kv => kv.Key.ToString(), StringComparer.Ordinal).ToArray(),
+            actual.PortFlowTotals.OrderBy(kv => kv.Key.ToString(), StringComparer.Ordinal).ToArray());
         Assert.Equal(
             expected.Actors.OrderBy(kv => kv.Key.Value).ToArray(),
             actual.Actors.OrderBy(kv => kv.Key.Value).ToArray());

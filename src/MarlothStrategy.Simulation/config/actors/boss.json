@@ -1,6 +1,7 @@
 {
   "id": "boss",
   "capacity": 1.0,
+  "wage": 3,
   "stats": {
     "sales": 10,
     "payroll": 10,

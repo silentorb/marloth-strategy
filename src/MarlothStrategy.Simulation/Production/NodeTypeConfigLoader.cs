@@ -47,7 +47,23 @@ public static class NodeTypeConfigLoader
 
         var payroll = ReadRequired<PayrollNodeConfigDto, PayrollNodeConfig>(
             Path.Combine(directory, "payroll.json"),
-            dto => new PayrollNodeConfig(dto.Period, dto.BaseEffort, dto.PerActorEffort));
+            dto =>
+            {
+                if (dto.Schedule is null)
+                {
+                    throw new InvalidOperationException(
+                        $"Payroll config requires a schedule object in '{Path.Combine(directory, "payroll.json")}'.");
+                }
+
+                return new PayrollNodeConfig(
+                    new PayrollScheduleConfig(
+                        dto.Schedule.PeriodUnit,
+                        dto.Schedule.PositionUnit,
+                        dto.Schedule.StartLead,
+                        dto.Schedule.DueDay),
+                    dto.BaseEffort,
+                    dto.PerActorEffort);
+            });
 
         var merge = ReadRequired<MergeNodeConfigDto, MergeNodeConfig>(
             Path.Combine(directory, "merge.json"),
@@ -129,10 +145,25 @@ public static class NodeTypeConfigLoader
         public double Effort { get; init; }
     }
 
+    private sealed class PayrollScheduleConfigDto
+    {
+        [JsonRequired]
+        public string PeriodUnit { get; init; } = "";
+
+        [JsonRequired]
+        public string PositionUnit { get; init; } = "";
+
+        [JsonRequired]
+        public int StartLead { get; init; }
+
+        [JsonRequired]
+        public int DueDay { get; init; }
+    }
+
     private sealed class PayrollNodeConfigDto
     {
         [JsonRequired]
-        public int Period { get; init; }
+        public PayrollScheduleConfigDto Schedule { get; init; } = null!;
 
         [JsonRequired]
         public double BaseEffort { get; init; }

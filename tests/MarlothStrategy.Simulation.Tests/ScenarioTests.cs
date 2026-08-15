@@ -17,7 +17,7 @@ public sealed class ScenarioTests
         new TestingNodeConfig(Effort: 10, FallacyReduction: 5),
         new SellNodeConfig(Effort: 10, PayoutFloor: 0),
         new TreasuryNodeConfig(Effort: 1),
-        new PayrollNodeConfig(Period: 5, BaseEffort: 1, PerActorEffort: 1),
+        new PayrollNodeConfig(new PayrollScheduleConfig("month", "day", 0, 10), BaseEffort: 1, PerActorEffort: 1),
         new MergeNodeConfig(Effort: 1),
         new DesignNodeConfig(Effort: 3, DesignDelta: 1, DarknessReduction: 0.9));
 
@@ -52,7 +52,8 @@ public sealed class ScenarioTests
         Assert.All(state.Assignments, a => Assert.Equal(1m, a.Weight));
         Assert.Equal(100, Assert.IsType<SignalValue.Money>(
             state.PortSignals[new PortKey(MagicAgencySeed.TreasuryNodeId, MagicAgencySeed.MoneyPortId)]).Amount);
-        Assert.Equal(0, state.NodeTimers[MagicAgencySeed.PayrollNodeId]);
+        Assert.Null(state.ActivePayrollRun);
+        Assert.Empty(state.NodeTimers);
     }
 
     [Fact]
