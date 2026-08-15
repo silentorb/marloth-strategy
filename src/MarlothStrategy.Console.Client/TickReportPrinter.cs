@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using System.Globalization;
 using MarlothStrategy.Simulation;
 using MarlothStrategy.Simulation.Graph;
@@ -31,18 +30,7 @@ public static class TickReportPrinter
             throw new ArgumentOutOfRangeException(nameof(width), width, "width must be at least 10.");
         }
 
-        var header = new List<string>
-        {
-            Title,
-            $"Tick {state.Tick}",
-            FormatCalendarLine(state.TimePartitions, state.Tick),
-        };
-        if (config is not null)
-        {
-            header.Add($"scenario: {config.ScenarioLabel} seed {config.ScenarioSeed}");
-        }
-
-        header.Add(FormatActorsLine(state, previous));
+        var header = StatusHeader.Build(state, previous, config, ScreenId.Workflow);
 
         var nodes = state.Graph.Nodes.Keys
             .OrderBy(id => id.Value, StringComparer.Ordinal)
@@ -99,30 +87,6 @@ public static class TickReportPrinter
         }
 
         return $"{position.Name} {position.Index}";
-    }
-
-    private static string FormatActorsLine(GameState state, GameState? previous)
-    {
-        var current = FormatActorRoster(state.Actors);
-        if (previous is null)
-        {
-            return $"actors: {current}";
-        }
-
-        var prior = FormatActorRoster(previous.Actors);
-        return $"actors: {FormatChange(prior, current)}";
-    }
-
-    private static string FormatActorRoster(ImmutableDictionary<ActorId, Actor> actors)
-    {
-        if (actors.IsEmpty)
-        {
-            return "0";
-        }
-
-        return string.Join(
-            ", ",
-            actors.Keys.OrderBy(id => id.Value, StringComparer.Ordinal).Select(id => id.Value));
     }
 
     private static List<string> FormatNodeLines(
@@ -186,7 +150,7 @@ public static class TickReportPrinter
         return state.Assignments
             .Where(a => a.NodeId == nodeId)
             .OrderBy(a => a.ActorId.Value, StringComparer.Ordinal)
-            .Select(a => $"{a.ActorId.Value} {FormatWeight(a.Weight)}")
+            .Select(a => $"{a.ActorId.Value} {DisplayFormatting.FormatDecimal(a.Weight)}")
             .ToList();
     }
 
@@ -269,17 +233,6 @@ public static class TickReportPrinter
         }
 
         return text.PadRight(width);
-    }
-
-    private static string FormatWeight(decimal weight)
-    {
-        // Relative ratios: show whole numbers without a trailing ".0".
-        if (weight == decimal.Truncate(weight))
-        {
-            return decimal.Truncate(weight).ToString(CultureInfo.InvariantCulture);
-        }
-
-        return weight.ToString(CultureInfo.InvariantCulture);
     }
 
     private static bool ShowsCycles(NodeTypeId typeId) =>

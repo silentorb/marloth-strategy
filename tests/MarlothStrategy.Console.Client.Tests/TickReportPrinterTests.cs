@@ -54,6 +54,7 @@ public sealed class TickReportPrinterTests
         Assert.Contains("Marloth Strategy", text);
         Assert.Contains("Tick 0", text);
         Assert.Contains("month 1, week 1/4, day 1/7", text);
+        Assert.Contains("screen: workflow", text);
         Assert.Contains("actors: boss, intern", text);
         Assert.Contains("enchant:", text);
         Assert.Contains("intern 1", text);

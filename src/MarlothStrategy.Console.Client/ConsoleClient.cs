@@ -17,12 +17,13 @@ public static class ConsoleClient
         var baseline = state;
         var userConfig = UserConfigStore.LoadOrDefault(userConfigPath, state.TimePartitions);
         var stepResolution = userConfig.StepResolution;
-        DrawReport(state, config, baseline);
+        var screen = ScreenId.Workflow;
+        DrawReport(state, config, baseline, screen);
 
         while (true)
         {
             System.Console.Write(
-                $"Enter = next {stepResolution}, - = finer, + (= key) = coarser, n = new game, q = quit> ");
+                $"Enter = next {stepResolution}, - = finer, + (= key) = coarser, w/a = workflow/actors, n = new game, q = quit> ");
             switch (ReadPromptAction())
             {
                 case PromptAction.Quit:
@@ -30,20 +31,30 @@ public static class ConsoleClient
                     System.Console.WriteLine("Exiting.");
                     return;
                 case PromptAction.Unknown:
-                    DrawReport(state, config, baseline);
+                    DrawReport(state, config, baseline, screen);
                     System.Console.WriteLine(
-                        $"Unknown input. Press Enter for next {stepResolution}, - for finer, + (= key) for coarser, n for a new game, or q to quit.");
+                        $"Unknown input. Press Enter for next {stepResolution}, - for finer, + (= key) for coarser, w/a for workflow/actors, n for a new game, or q to quit.");
                     continue;
                 case PromptAction.NewGame:
                     state = ScenarioBootstrap.CreateInitialState(config);
                     baseline = state;
-                    DrawReport(state, config, baseline);
+                    screen = ScreenId.Workflow;
+                    DrawReport(state, config, baseline, screen);
+                    break;
+                case PromptAction.ShowWorkflowScreen:
+                    screen = ScreenId.Workflow;
+                    DrawReport(state, config, baseline, screen);
+                    break;
+                case PromptAction.ShowActorsScreen:
+                    screen = ScreenId.Actors;
+                    DrawReport(state, config, baseline, screen);
                     break;
                 case PromptAction.AdvanceStep:
                     AdvanceAndDraw(
                         ref state,
                         config,
                         baseline,
+                        screen,
                         tickCount: state.TimePartitions.TicksPer(stepResolution));
                     break;
                 case PromptAction.DecreaseStepResolution:
@@ -53,7 +64,7 @@ public static class ConsoleClient
                         stepResolution = finer;
                     }
 
-                    DrawReport(state, config, baseline);
+                    DrawReport(state, config, baseline, screen);
                     break;
                 case PromptAction.IncreaseStepResolution:
                     if (state.TimePartitions.TryGetCoarserStepResolution(stepResolution, out var coarser))
@@ -62,7 +73,7 @@ public static class ConsoleClient
                         stepResolution = coarser;
                     }
 
-                    DrawReport(state, config, baseline);
+                    DrawReport(state, config, baseline, screen);
                     break;
             }
         }
@@ -82,25 +93,34 @@ public static class ConsoleClient
         ref GameState state,
         GameConfig config,
         GameState baseline,
+        ScreenId screen,
         int tickCount)
     {
         var previous = state;
         var result = ProductionTick.AdvanceTicksWithReport(state, tickCount);
         state = result.State;
-        DrawReport(state, config, baseline, previous, result);
+        DrawReport(state, config, baseline, screen, previous, result);
     }
 
     private static void DrawReport(
         GameState state,
         GameConfig config,
         GameState baseline,
+        ScreenId screen,
         GameState? previous = null,
         ProductionTickResult? tick = null)
     {
         TryClear();
         var width = ResolveWidth();
-        System.Console.WriteLine(
-            TickReportPrinter.FormatScreen(state, previous, tick, width, config, baseline));
+        var text = screen switch
+        {
+            ScreenId.Workflow => TickReportPrinter.FormatScreen(
+                state, previous, tick, width, config, baseline),
+            ScreenId.Actors => ActorsScreenPrinter.FormatScreen(
+                state, previous, width, config),
+            _ => throw new ArgumentOutOfRangeException(nameof(screen), screen, "Unknown screen."),
+        };
+        System.Console.WriteLine(text);
         System.Console.WriteLine();
     }
 
@@ -136,7 +156,7 @@ public static class ConsoleClient
 
     /// <summary>
     /// Interactive terminals use single-key <see cref="System.Console.ReadKey"/>
-    /// (Enter / - / =|+ / n / q). Redirected stdin (agent smoke) falls back to line mode.
+    /// (Enter / - / =|+ / w / a / n / q). Redirected stdin (agent smoke) falls back to line mode.
     /// </summary>
     private static PromptAction ReadPromptAction()
     {

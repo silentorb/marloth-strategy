@@ -137,6 +137,82 @@ public static class PanelLayout
         return canvas.ToString();
     }
 
+    /// <summary>
+    /// Builds a double-bordered frame: top panel spanning full width, then full-width stacked
+    /// subpanels (shared outer double border, single-line <c>╟</c>/<c>╢</c> dividers).
+    /// </summary>
+    public static string ComposeStacked(
+        IReadOnlyList<string> headerLines,
+        IReadOnlyList<IReadOnlyList<string>> subpanels,
+        int totalWidth)
+    {
+        ArgumentNullException.ThrowIfNull(headerLines);
+        ArgumentNullException.ThrowIfNull(subpanels);
+
+        if (totalWidth < 10)
+        {
+            throw new ArgumentOutOfRangeException(nameof(totalWidth), totalWidth, "totalWidth must be at least 10.");
+        }
+
+        if (subpanels.Count == 0)
+        {
+            throw new ArgumentException("At least one subpanel is required.", nameof(subpanels));
+        }
+
+        var interiorWidth = totalWidth - 2;
+        var headerBodyHeight = Math.Max(1, headerLines.Count);
+        var bodyHeights = subpanels.Select(p => Math.Max(1, p.Count)).ToArray();
+        var bodyHeight = bodyHeights.Sum() + (subpanels.Count - 1); // content + dividers
+
+        var totalHeight = 1 + headerBodyHeight + 1 + bodyHeight + 1; // top, header, split, body, floor
+        var canvas = new AsciiCanvas(totalWidth, totalHeight);
+
+        canvas.DrawDoubleRect(0, 0, totalWidth, totalHeight);
+
+        var splitY = 1 + headerBodyHeight;
+        canvas.DrawHorizontalDivider(
+            0,
+            totalWidth - 1,
+            splitY,
+            BoxDrawing.DoubleTeeLeft,
+            BoxDrawing.DoubleHorizontal,
+            BoxDrawing.DoubleTeeRight);
+
+        for (var i = 0; i < headerBodyHeight; i++)
+        {
+            var line = i < headerLines.Count ? headerLines[i] : string.Empty;
+            WritePadded(canvas, 1, 1 + i, line, interiorWidth);
+        }
+
+        var bodyY = splitY + 1;
+        for (var panelIndex = 0; panelIndex < subpanels.Count; panelIndex++)
+        {
+            if (panelIndex > 0)
+            {
+                canvas.DrawHorizontalDivider(
+                    0,
+                    totalWidth - 1,
+                    bodyY,
+                    BoxDrawing.MixedTeeLeft,
+                    BoxDrawing.SingleHorizontal,
+                    BoxDrawing.MixedTeeRight);
+                bodyY++;
+            }
+
+            var panel = subpanels[panelIndex];
+            var panelHeight = bodyHeights[panelIndex];
+            for (var row = 0; row < panelHeight; row++)
+            {
+                var line = row < panel.Count ? panel[row] : string.Empty;
+                WritePadded(canvas, 1, bodyY + row, line, interiorWidth);
+            }
+
+            bodyY += panelHeight;
+        }
+
+        return canvas.ToString();
+    }
+
     private static void WritePadded(AsciiCanvas canvas, int x, int y, string text, int width)
     {
         if (width <= 0)

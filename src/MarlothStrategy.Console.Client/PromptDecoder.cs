@@ -5,6 +5,8 @@ public enum PromptAction
     AdvanceStep,
     DecreaseStepResolution,
     IncreaseStepResolution,
+    ShowWorkflowScreen,
+    ShowActorsScreen,
     NewGame,
     Quit,
     Unknown,
@@ -36,6 +38,16 @@ public static class PromptDecoder
         if (trimmed.Equals("n", StringComparison.OrdinalIgnoreCase))
         {
             return PromptAction.NewGame;
+        }
+
+        if (trimmed.Equals("w", StringComparison.OrdinalIgnoreCase))
+        {
+            return PromptAction.ShowWorkflowScreen;
+        }
+
+        if (trimmed.Equals("a", StringComparison.OrdinalIgnoreCase))
+        {
+            return PromptAction.ShowActorsScreen;
         }
 
         if (trimmed == "-")
@@ -78,6 +90,16 @@ public static class PromptDecoder
         if (key.KeyChar is 'n' or 'N')
         {
             return PromptAction.NewGame;
+        }
+
+        if (key.KeyChar is 'w' or 'W')
+        {
+            return PromptAction.ShowWorkflowScreen;
+        }
+
+        if (key.KeyChar is 'a' or 'A')
+        {
+            return PromptAction.ShowActorsScreen;
         }
 
         return PromptAction.Unknown;

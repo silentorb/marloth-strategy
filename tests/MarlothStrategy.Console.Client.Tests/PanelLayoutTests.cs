@@ -58,4 +58,42 @@ public sealed class PanelLayoutTests
         Assert.Contains("this-line", normalized);
         Assert.DoesNotContain("definitely-too-long", normalized);
     }
+
+    [Fact]
+    public void ComposeStacked_UsesDoubleOuterAndFullWidthSubpanelDividers()
+    {
+        var text = PanelLayout.ComposeStacked(
+            headerLines: ["Title", "Tick 0"],
+            subpanels:
+            [
+                ["a:", "  x: 1"],
+                ["b:", "  y: 2"],
+            ],
+            totalWidth: 40);
+
+        var normalized = text.Replace("\r\n", "\n");
+        var lines = normalized.Split('\n');
+
+        Assert.Equal(40, lines[0].Length);
+        Assert.StartsWith($"{BoxDrawing.DoubleTopLeft}", lines[0]);
+        Assert.EndsWith($"{BoxDrawing.DoubleTopRight}", lines[0]);
+        Assert.Contains("Title", normalized);
+        Assert.Contains("Tick 0", normalized);
+        Assert.Contains("a:", normalized);
+        Assert.Contains("b:", normalized);
+        Assert.Contains($"{BoxDrawing.MixedTeeLeft}", normalized);
+        Assert.Contains($"{BoxDrawing.MixedTeeRight}", normalized);
+        Assert.DoesNotContain($"{BoxDrawing.MixedTeeTop}", normalized);
+        Assert.StartsWith($"{BoxDrawing.DoubleBottomLeft}", lines[^1]);
+    }
+
+    [Fact]
+    public void ComposeStacked_RejectsEmptySubpanels()
+    {
+        Assert.Throws<ArgumentException>(() =>
+            PanelLayout.ComposeStacked(
+                headerLines: ["H"],
+                subpanels: Array.Empty<IReadOnlyList<string>>(),
+                totalWidth: 40));
+    }
 }
