@@ -11,11 +11,13 @@ public static class ConsoleClient
 
         var state = ScenarioBootstrap.CreateInitialState(config);
         var baseline = state;
+        var advanceLabel = state.TimePartitions.AdvanceUnit;
         DrawReport(state, config, baseline);
 
         while (true)
         {
-            System.Console.Write("Enter = next tick, q = quit> ");
+            System.Console.Write(
+                $"Enter = next tick, Space = next {advanceLabel}, q = quit> ");
             switch (ReadPromptAction())
             {
                 case PromptAction.Quit:
@@ -24,16 +26,33 @@ public static class ConsoleClient
                     return;
                 case PromptAction.Unknown:
                     DrawReport(state, config, baseline);
-                    System.Console.WriteLine("Unknown input. Press Enter for next tick, or q to quit.");
+                    System.Console.WriteLine(
+                        $"Unknown input. Press Enter for next tick, Space for next {advanceLabel}, or q to quit.");
                     continue;
-                case PromptAction.Advance:
-                    var previous = state;
-                    var result = ProductionTick.AdvanceTickWithReport(state);
-                    state = result.State;
-                    DrawReport(state, config, baseline, previous, result);
+                case PromptAction.AdvanceTick:
+                    AdvanceAndDraw(ref state, config, baseline, tickCount: 1);
+                    break;
+                case PromptAction.AdvanceMacro:
+                    AdvanceAndDraw(
+                        ref state,
+                        config,
+                        baseline,
+                        tickCount: state.TimePartitions.AdvanceTickCount);
                     break;
             }
         }
+    }
+
+    private static void AdvanceAndDraw(
+        ref GameState state,
+        GameConfig config,
+        GameState baseline,
+        int tickCount)
+    {
+        var previous = state;
+        var result = ProductionTick.AdvanceTicksWithReport(state, tickCount);
+        state = result.State;
+        DrawReport(state, config, baseline, previous, result);
     }
 
     private static void DrawReport(
@@ -80,49 +99,17 @@ public static class ConsoleClient
         return PanelLayout.DefaultWidth;
     }
 
-    private enum PromptAction
-    {
-        Advance,
-        Quit,
-        Unknown,
-    }
-
     /// <summary>
-    /// Interactive terminals use single-key <see cref="System.Console.ReadKey"/> (Enter / q).
+    /// Interactive terminals use single-key <see cref="System.Console.ReadKey"/> (Enter / Space / q).
     /// Redirected stdin (agent smoke) falls back to line mode.
     /// </summary>
     private static PromptAction ReadPromptAction()
     {
         if (System.Console.IsInputRedirected)
         {
-            var line = System.Console.ReadLine();
-            if (line is null)
-            {
-                return PromptAction.Quit;
-            }
-
-            var trimmed = line.Trim();
-            if (trimmed.Length == 0)
-            {
-                return PromptAction.Advance;
-            }
-
-            return trimmed.Equals("q", StringComparison.OrdinalIgnoreCase)
-                ? PromptAction.Quit
-                : PromptAction.Unknown;
+            return PromptDecoder.FromRedirectedLine(System.Console.ReadLine());
         }
 
-        var key = System.Console.ReadKey(intercept: true);
-        if (key.Key == ConsoleKey.Enter)
-        {
-            return PromptAction.Advance;
-        }
-
-        if (key.KeyChar is 'q' or 'Q')
-        {
-            return PromptAction.Quit;
-        }
-
-        return PromptAction.Unknown;
+        return PromptDecoder.FromConsoleKey(System.Console.ReadKey(intercept: true));
     }
 }

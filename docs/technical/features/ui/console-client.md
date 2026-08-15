@@ -7,10 +7,11 @@
 ## When to read this
 
 - Changing console prompts, session loop, or panel report formatting
-- Wiring Client to Simulation tick/report APIs
+- Wiring Client to Simulation tick/report APIs (including multi-tick macro advance)
 - Adding IDE play launch configuration for the console App
 - Changing box-drawing / panel layout helpers
 - Adding or changing optional play-only dotenv / `.env` overrides on the App host (`SCENARIO_PRESET`, `SCENARIO_SEED`)
+- Changing calendar header formatting derived from time partitions
 
 ## Host and session
 
@@ -18,10 +19,11 @@
 - App reads `SCENARIO_PRESET` (optional name; whitespace/empty → unset → random scenario) and `SCENARIO_SEED` (optional integer; unset → `Random.Shared.Next()`; invalid → fail-fast at the abort boundary) into `GameConfig`, then calls `ConsoleClient.Run(config)`.
 - Prefer a **single abort boundary** at process entry for fatal/unrecoverable errors ([error handling](../platform/error-handling.md)); do not scatter catches in Client.
 - Client boots with `ScenarioBootstrap.CreateInitialState(config)`, clears the screen, prints the tick-0 panel screen, then loops until quit/EOF ([console loop](../../../game/features/session/console-loop.md)).
-- On Enter: capture prior state, `var result = ProductionTick.AdvanceTickWithReport(state); state = result.State;` then clear and print `FormatScreen(state, previous, result, …, baseline: tick0)` so change arrows use committed stocks (and cycles / actors) and the Δ column uses tick-0 baselines.
-- Interactive input uses `Console.ReadKey(intercept: true)` so **Enter** and **`q`/`Q`** are single keypresses. When `Console.IsInputRedirected`, fall back to `ReadLine` (empty line / `q`) for agent piped smoke.
+- On Enter: capture prior state, `AdvanceTicksWithReport(state, 1)`, then clear and print `FormatScreen(state, previous, result, …, baseline: tick0)` so change arrows use committed stocks (and cycles / actors) and the Δ column uses tick-0 baselines.
+- On Space: same path with `tickCount = state.TimePartitions.AdvanceTickCount` (seed: 7). Change arrows compare pre-macro state to post-macro state (one summary for the whole interval). The last tick's `ProductionTickResult` is passed through for API symmetry; the Client does not print per-node I/O rows.
+- Interactive input uses `Console.ReadKey(intercept: true)` so **Enter**, **Space**, and **`q`/`Q`** are single keypresses. When `Console.IsInputRedirected`, fall back to `ReadLine` (empty line / `space` / `q`) for agent piped smoke. Decoding lives in `PromptDecoder`.
 - Invalid prompt input clears, redraws the current screen, prints a short hint, and re-prompts. Expected player mistakes are not exceptions.
-- The prompt sits **below** the framed report (not inside a panel).
+- The prompt sits **below** the framed report (not inside a panel). Prompt text names the configured advance unit (e.g. `Space = next week`).
 
 ## Screen redraw
 
@@ -36,6 +38,7 @@ The screen is three logical regions composed with classic single- and double-lin
 ╔══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗
 ║ Marloth Strategy                                                                                                     ║
 ║ Tick N                                                                                                               ║
+║ month 1, week 1/4, day 1/7                                                                                           ║
 ║ actors: …                                                                                                            ║
 ╠════════════════════════════════════════════════════════╤═════════════════════════════════════════════════════════════╣
 ║ node-id:            │ Δ      │ actor weight            │  (flow graph)                                               ║
@@ -48,7 +51,7 @@ The screen is three logical regions composed with classic single- and double-lin
 
 | Region | Border | Content |
 |--------|--------|---------|
-| Top status | Double outer | Title, `Tick N`, `actors:` line |
+| Top status | Double outer | Title, `Tick N`, calendar positions (largest → smallest), `actors:` line |
 | Left state | Double outer shared with right; node **subpanels** stacked with single-line horizontal dividers (`╟`/`╢` against double verticals) | One subpanel per graph node (id order). Each subpanel is **split horizontally** into three columns when a tick-0 baseline is supplied: left = port / cycles leaves; middle = signed net change since tick 0 (`Δ`); right = preferred assignments as `actorId weight` (ordinal by actor id; blank when none). Without a baseline, the middle column is omitted |
 | Right flow | Double outer; interior uses single-line node boxes | MSAGL Sugiyama + rectilinear routing with `RelativeFloatingPort` anchors (inputs on top, outputs on bottom, spaced per port); ASCII rasterizes those polylines |
 
@@ -61,6 +64,7 @@ Leaf formatting inside left subpanels (and header actors) follows:
 | Rule | Detail |
 |------|--------|
 | Title / tick | Header lines: `Marloth Strategy`, then `Tick {N}` |
+| Calendar | Header line from `TimePartitions.PositionsAt(Tick)`: largest unit first, e.g. `month 1, week 1/4, day 1/7` |
 | Scenario | When `GameConfig` is supplied: `scenario: {preset-or-random} seed {N}` (`lab01`, `random`, etc.) |
 | Actors | One `actors:` line: comma-separated actor ids (ordinal) when present; `0` when the roster is empty. With a previous state, annotate roster changes with `previous → current` (e.g. `boss, intern → 0` after a mass quit) |
 | Nodes | One left subpanel per graph node, ordered by node id. Each subpanel splits horizontally: state leaves; optional signed Δ since tick 0; preferred assignments (`actorId weight`, ordinal by actor id) |

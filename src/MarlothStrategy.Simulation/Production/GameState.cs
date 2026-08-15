@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using MarlothStrategy.Simulation.Graph;
+using MarlothStrategy.Simulation.Time;
 
 namespace MarlothStrategy.Simulation.Production;
 
@@ -16,4 +17,5 @@ public sealed record GameState(
     ImmutableArray<PendingMoneyMove> PendingMoneyMoves,
     ImmutableDictionary<string, EnchantmentBlock> EnchantmentBlocks,
     ulong NextUnitId,
-    int Tick);
+    int Tick,
+    TimePartitionConfig TimePartitions);

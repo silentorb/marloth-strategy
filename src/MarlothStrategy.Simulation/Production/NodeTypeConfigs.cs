@@ -23,9 +23,9 @@ public sealed record TreasuryNodeConfig(double Effort);
 
 /// <summary>Numeric parameters for the payroll node type (loaded from JSON).</summary>
 public sealed record PayrollNodeConfig(
-    double DefaultWage,
     int Period,
-    double Effort);
+    double BaseEffort,
+    double PerActorEffort);
 
 /// <summary>Numeric parameters for the merge node type (loaded from JSON).</summary>
 public sealed record MergeNodeConfig(double Effort);

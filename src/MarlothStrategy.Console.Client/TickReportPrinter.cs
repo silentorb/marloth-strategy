@@ -3,6 +3,7 @@ using System.Globalization;
 using MarlothStrategy.Simulation;
 using MarlothStrategy.Simulation.Graph;
 using MarlothStrategy.Simulation.Production;
+using MarlothStrategy.Simulation.Time;
 
 namespace MarlothStrategy.Console.Client;
 
@@ -34,6 +35,7 @@ public static class TickReportPrinter
         {
             Title,
             $"Tick {state.Tick}",
+            FormatCalendarLine(state.TimePartitions, state.Tick),
         };
         if (config is not null)
         {
@@ -70,6 +72,16 @@ public static class TickReportPrinter
         ProductionTickResult? tick = null) =>
         FormatScreen(state, previous, tick);
 
+    public static string FormatCalendarLine(TimePartitionConfig timePartitions, int tick)
+    {
+        ArgumentNullException.ThrowIfNull(timePartitions);
+        var positions = timePartitions.PositionsAt(tick);
+        // Largest unit first for a calendar-like read (month … day).
+        return string.Join(
+            ", ",
+            positions.Reverse().Select(FormatPosition));
+    }
+
     public static string FormatSignal(SignalValue? value) => value switch
     {
         null => "0",
@@ -78,6 +90,16 @@ public static class TickReportPrinter
             $"{e.Block.AbbreviatedHash} {FormatRounded(e.Volume)}/{FormatRounded(e.Designs)}/{FormatScalar(e.Darkness)}/{FormatScalar(e.Fallacy)}",
         _ => throw new InvalidOperationException($"Unknown signal value kind: {value.GetType().Name}."),
     };
+
+    private static string FormatPosition(TimePartitionPosition position)
+    {
+        if (position.OfParent is int ofParent)
+        {
+            return $"{position.Name} {position.Index}/{ofParent}";
+        }
+
+        return $"{position.Name} {position.Index}";
+    }
 
     private static string FormatActorsLine(GameState state, GameState? previous)
     {

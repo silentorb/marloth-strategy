@@ -47,7 +47,7 @@ public static class NodeTypeConfigLoader
 
         var payroll = ReadRequired<PayrollNodeConfigDto, PayrollNodeConfig>(
             Path.Combine(directory, "payroll.json"),
-            dto => new PayrollNodeConfig(dto.DefaultWage, dto.Period, dto.Effort));
+            dto => new PayrollNodeConfig(dto.Period, dto.BaseEffort, dto.PerActorEffort));
 
         var merge = ReadRequired<MergeNodeConfigDto, MergeNodeConfig>(
             Path.Combine(directory, "merge.json"),
@@ -132,13 +132,13 @@ public static class NodeTypeConfigLoader
     private sealed class PayrollNodeConfigDto
     {
         [JsonRequired]
-        public double DefaultWage { get; init; }
-
-        [JsonRequired]
         public int Period { get; init; }
 
         [JsonRequired]
-        public double Effort { get; init; }
+        public double BaseEffort { get; init; }
+
+        [JsonRequired]
+        public double PerActorEffort { get; init; }
     }
 
     private sealed class MergeNodeConfigDto

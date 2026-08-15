@@ -10,5 +10,5 @@ Feature docs may later be grouped under `ui/`, `gameplay/`, `session/`, and simi
 | File | Read when… |
 |------|------------|
 | [../game-design.md](../game-design.md) | Reading **gameplay vision**, genre, or surface (console vs Godot). **Do not edit** unless the user explicitly instructed changes to that file. |
-| [gameplay/production-flows.md](gameplay/production-flows.md) | Designing or changing **production flows**, nodes, resources/signals, **actors**, **assignment**, payroll/treasury, circular configs, **scenario presets**, or random scenario generation. |
-| [session/console-loop.md](session/console-loop.md) | Changing **console session** commands (Enter / `q`), open-ended play, or player-facing **post-tick I/O reports**. |
+| [gameplay/production-flows.md](gameplay/production-flows.md) | Designing or changing **production flows**, nodes, resources/signals, **actors**, **assignment**, payroll/treasury, circular configs, **time partitions** / turn pacing, **scenario presets**, or random scenario generation. |
+| [session/console-loop.md](session/console-loop.md) | Changing **console session** commands (Enter / Space / `q`), open-ended play, or player-facing **post-tick I/O reports**. |

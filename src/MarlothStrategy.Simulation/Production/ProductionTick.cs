@@ -15,6 +15,34 @@ public static class ProductionTick
         AdvanceTickWithReport(state, OrderNodes(state.Graph.Nodes.Keys));
 
     /// <summary>
+    /// Advances exactly <paramref name="tickCount"/> production ticks by composing
+    /// <see cref="AdvanceTickWithReport(GameState)"/>. Returns the final tick's report.
+    /// </summary>
+    public static GameState AdvanceTicks(GameState state, int tickCount) =>
+        AdvanceTicksWithReport(state, tickCount).State;
+
+    public static ProductionTickResult AdvanceTicksWithReport(GameState state, int tickCount)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        if (tickCount <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(tickCount),
+                tickCount,
+                "tickCount must be a positive integer.");
+        }
+
+        ProductionTickResult? last = null;
+        for (var i = 0; i < tickCount; i++)
+        {
+            last = AdvanceTickWithReport(state);
+            state = last.State;
+        }
+
+        return last!;
+    }
+
+    /// <summary>
     /// Advances one production tick and returns per-node I/O. <paramref name="nodeOrder"/> only
     /// affects report row order; simulation results are independent of that permutation.
     /// </summary>
@@ -90,11 +118,24 @@ public static class ProductionTick
         return actor.Stats.TryGetValue(key, out var value) ? value : defaultValue;
     }
 
-    public static double EffectiveWage(Actor actor, PayrollNodeConfig payroll)
+    /// <summary>
+    /// Paid roster actors (explicit <see cref="Actor.Wage"/>) ordered by id for deterministic totals.
+    /// </summary>
+    public static IEnumerable<Actor> PaidActors(GameState state)
     {
-        ArgumentNullException.ThrowIfNull(actor);
-        ArgumentNullException.ThrowIfNull(payroll);
-        return actor.Wage ?? payroll.DefaultWage;
+        ArgumentNullException.ThrowIfNull(state);
+        return state.Actors.Values
+            .Where(a => a.Wage.HasValue)
+            .OrderBy(a => a.Id.Value, StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// Required work for one payday application: <c>baseEffort + perActorEffort × paidActorCount</c>.
+    /// </summary>
+    public static double EffectivePayrollEffort(PayrollNodeConfig config, int paidActorCount)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        return config.BaseEffort + config.PerActorEffort * paidActorCount;
     }
 
     private static List<(Assignment Assignment, decimal Share)> ResolveActorShares(
@@ -1092,15 +1133,19 @@ public static class ProductionTick
                 ActorStatKeys.Payroll,
                 ActorStatKeys.DefaultPayroll);
 
-            if (config.Effort > 0 && nextProgress >= config.Effort)
+            var paidActors = PaidActors(state).ToList();
+            var paidActorCount = paidActors.Count;
+            var effectiveEffort = EffectivePayrollEffort(config, paidActorCount);
+
+            if (effectiveEffort > 0 && nextProgress >= effectiveEffort)
             {
                 // One payday per due period: clear progress so excess gain does not carry.
                 nextProgress = 0;
                 applications = 1;
                 var wageTotal = 0.0;
-                foreach (var actor in state.Actors.Values.OrderBy(a => a.Id.Value, StringComparer.Ordinal))
+                foreach (var actor in paidActors)
                 {
-                    wageTotal += EffectiveWage(actor, config);
+                    wageTotal += actor.Wage!.Value;
                 }
 
                 if (wageTotal > 0)

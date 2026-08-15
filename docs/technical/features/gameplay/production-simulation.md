@@ -6,8 +6,8 @@ Authoritative production state lives in **Simulation** as an Imp-inspired node g
 
 ## When to read this
 
-- Changing graph/signal types, tick phases, assignment effort, progress, payroll/treasury, testing, design, merge, port-level `+`, scenario presets, or seed factories
-- Implementing or testing `AdvanceTick` / `GameState`
+- Changing graph/signal types, tick phases, assignment effort, progress, payroll/treasury, testing, design, merge, port-level `+`, scenario presets, **time partitions**, or seed factories
+- Implementing or testing `AdvanceTick` / `AdvanceTicks` / `GameState`
 - Comparing Marloth’s graph model to Imp
 
 ## Imp inspiration (no Imp dependency)
@@ -49,7 +49,7 @@ Identifiers are strings (or thin string wrappers): `NodeId`, `EdgeId`, `NodeType
 | `Assignment` | Preferred `ActorId` → `NodeId` with positive relative `Weight` (`decimal`, default `1`) (many nodes per actor) |
 | `PendingMoneyMove` | FIFO treasury queue entry: direction `In` / `Out` + `Amount` |
 | `NodeTypeConfigs` | Per-type behavior numerics loaded from JSON and attached to state |
-| `GameState` | Graph + catalog + port signals + actors + preferred assignments + node configs + **node progress** + **node timers** + **node cycles** + **pending money moves** + **enchantment block map** + **next unit id** + `Tick` |
+| `GameState` | Graph + catalog + port signals + actors + preferred assignments + node configs + **node progress** + **node timers** + **node cycles** + **pending money moves** + **enchantment block map** + **next unit id** + `Tick` + **`TimePartitions`** (immutable nested calendar) |
 
 Port signals are keyed by `(NodeId, PortId)`. Node progress, node timers, and node cycles are keyed by `NodeId`.
 
@@ -84,12 +84,12 @@ Each seed node carries runtime `progress` (`double`, default `0`) and cumulative
 
 Node configs include:
 
-- **`effort`** (enchant / testing / design / merge / sell / treasury / payroll) — base work units per application
+- **`effort`** (enchant / testing / design / merge / sell / treasury) — base work units per application
 - enchant also has `volumeDelta`, `darknessDelta`, `designDarknessDelta`, `fallacyConstant`
 - design also has `designDelta`, `darknessReduction`
 - testing also has `fallacyReduction`
 - sell also has `payoutFloor`
-- payroll also has `defaultWage` / `period`
+- payroll has `period`, `baseEffort`, `perActorEffort` (required work = `baseEffort + perActorEffort ×` paid-actor count)
 
 **Enchant** required work per mutation = `config.effort + current.darkness` (recomputed after each mutate). Other nodes use `config.effort` per application. While progress covers the required amount, applications run and subtract that amount; each application increments that node’s `NodeCycles` by `1`.
 
@@ -147,13 +147,52 @@ Tunable numerics live in `config/node-types/{enchant,testing,design,merge,sell,t
 ### `payroll`
 
 - Input: `money` (receives routed wage payouts; consumed/disbursed — not residualled across ticks).
-- Config: `defaultWage`, `period`, `effort` (seed `10` / `5` / `1`).
+- Config: `period`, `baseEffort`, `perActorEffort` (seed `5` / `1` / `1`).
 - Stat: `payroll` (default `1`).
 - `GameState.NodeTimers[payroll]` is an elapsed count seeded to `0`.
 - **Timer (no actor):** when start-of-tick `elapsed < period`, end-of-tick sets `elapsed + 1`. When start-of-tick `elapsed >= period`, payday is due (timer unchanged unless payday application resets it to `0`).
-- **Payday due (start of tick `elapsed >= period`):** effective for assignment. Gain progress when assigned; when `progress >= effort`, if wage total `> 0` require at least one funding edge from a treasury `money` port to this node’s `money` input, then enqueue pending outbound for the wage total of all current actors; reset progress to `0`; reset timer to `0`. Missing funding edge with wage total `> 0` is fail-fast. Wage total `0` → reset progress and timer without enqueue.
-- Effective wage per actor = actor `Wage` if set, else `defaultWage`. Shortfall / mass-quit runs when treasury applies the out-move.
+- **Payday due (start of tick `elapsed >= period`):** effective for assignment. Gain progress when assigned; when `progress >=` required work (`baseEffort + perActorEffort ×` count of roster actors with an explicit `Wage`), if wage total `> 0` require at least one funding edge from a treasury `money` port to this node’s `money` input, then enqueue pending outbound for the sum of those explicit wages; reset progress to `0`; reset timer to `0`. Missing funding edge with wage total `> 0` is fail-fast. Wage total `0` (no paid actors) → reset progress and timer without enqueue.
+- Actors without an explicit `Wage` are excluded from both wage total and paid-actor count. Shortfall / mass-quit runs when treasury applies the out-move.
 - v1: exactly one `payroll` and one `treasury` node in the seed graph; missing/duplicate is fail-fast.
+- **Deferred:** payroll may later bind to a named global time-partition interval instead of a raw tick `period`. Until then, `period` stays tick-based and independent of week/month lengths.
+
+## Time partitions
+
+Nested calendar labels over the monotonic `Tick` counter. Configured in `config/time-partitions.json` and attached to `GameState.TimePartitions` at bootstrap. **Tick remains the only mutable clock**; day/week/month indices are derived, not stored.
+
+### Schema
+
+```json
+{
+  "units": [
+    { "name": "day", "contains": 1, "of": "tick" },
+    { "name": "week", "contains": 7, "of": "day" },
+    { "name": "month", "contains": 4, "of": "week" }
+  ],
+  "advanceUnit": "week"
+}
+```
+
+Validation (fail-fast): positive `contains`; unique unit names; no unit named `tick`; exactly one connected acyclic chain rooted at `of: "tick"`; `advanceUnit` is a declared non-`tick` unit; tick-duration products must fit in `int`.
+
+Seed defaults: 1 tick = 1 day; 7 days = 1 week; 4 weeks = 1 month; session macro advance uses **week** (7 ticks).
+
+### Positions and rollover
+
+`TimePartitionConfig.PositionsAt(tick)` returns one-based positions for each configured unit (smallest → largest). Nested units report `index/ofParent` (e.g. day `1/7`, week `1/4`); the largest unit is unbounded (`month 1`, `month 2`, …). At tick `0` every unit is at position `1`. Exact multiples roll into the next unit (tick `7` → day `1/7`, week `2/4`).
+
+### Boundary queries
+
+`BoundariesCrossed(fromTick, toTick)` returns configured unit names (smallest → largest) whose absolute index increases over `(fromTick, toTick]`. Empty when `fromTick == toTick`. This is the scheduling seam for future node logic; payroll does **not** use it yet.
+
+### Macro advance
+
+```csharp
+GameState AdvanceTicks(GameState state, int tickCount);
+ProductionTickResult AdvanceTicksWithReport(GameState state, int tickCount);
+```
+
+Composes the ordinary tick pipeline exactly `tickCount` times (`tickCount > 0`). Session Space uses `state.TimePartitions.AdvanceTickCount` (duration of `advanceUnit`), advancing that many ticks **from the current tick** — not snapping to the next boundary.
 
 ## Tick pipeline
 
@@ -162,10 +201,12 @@ Public API (pure):
 ```csharp
 GameState AdvanceTick(GameState state);
 ProductionTickResult AdvanceTickWithReport(GameState state);
+GameState AdvanceTicks(GameState state, int tickCount);
+ProductionTickResult AdvanceTicksWithReport(GameState state, int tickCount);
 // AdvanceTick(state) => AdvanceTickWithReport(state).State;
 ```
 
-`ProductionTickResult` carries the next `GameState` plus `ImmutableArray<NodeIoRow> Nodes` (one row per process-reporting node as implemented, same order as tick iteration). Each `NodeIoRow` reports the **primary** process ports (enchantment in/out for `enchant` / `testing` / `design`; primary in / enchantment out for `merge`; enchantment in / money out for `sell`) with typed `SignalValue` available / residual / produced fields and whether the primary input was consumed.
+`ProductionTickResult` carries the next `GameState` plus `ImmutableArray<NodeIoRow> Nodes` (one row per process-reporting node as implemented, same order as tick iteration). Each `NodeIoRow` reports the **primary** process ports (enchantment in/out for `enchant` / `testing` / `design`; primary in / enchantment out for `merge`; enchantment in / money out for `sell`) with typed `SignalValue` available / residual / produced fields and whether the primary input was consumed. Multi-tick advance returns the **final** tick's report.
 
 Pipeline (each step returns new data; no mutation of prior state):
 
@@ -188,7 +229,7 @@ state = AdvanceTick(state); // mutable binding, immutable values
 
 ## Scenarios
 
-Play bootstrap: `ScenarioBootstrap.CreateInitialState(GameConfig)` (loads node configs, actor definitions, and scenario JSON from `config/` under the app base directory; overloads accept explicit configs/actors/pool). `GameConfig.ScenarioPreset` selects a named file `config/scenarios/{name}.json`; null/whitespace generates a random scenario from `SCENARIO_SEED`. Unknown presets, invalid JSON, missing actors, assignments to absent nodes, or presets that include both testing and design are fail-fast (`InvalidOperationException` with path context).
+Play bootstrap: `ScenarioBootstrap.CreateInitialState(GameConfig)` (loads node configs, actor definitions, scenario JSON, and **time partitions** from `config/` under the app base directory; overloads accept explicit configs/actors/pool/time partitions). `GameConfig.ScenarioPreset` selects a named file `config/scenarios/{name}.json`; null/whitespace generates a random scenario from `SCENARIO_SEED`. Unknown presets, invalid JSON, missing actors, assignments to absent nodes, or presets that include both testing and design are fail-fast (`InvalidOperationException` with path context).
 
 - Node types: `enchant` (in/out `enchantment`), `design` (in/out `enchantment`), `testing` (in/out `enchantment`), `merge` (in `primary`/`secondary`, out `enchantment`; catalog only — not in seeded graphs), `sell` (in `enchantment`, out `money`), `treasury` (in/out `money`), `payroll` (in `money`). Catalog always includes all seven types.
 - **Essential graph:** nodes `enchant`, `sell`, `treasury`, `payroll`; edges `enchant.enchantment` → `enchant.enchantment` (self-loop); `enchant.enchantment` → `sell.enchantment`; `sell.money` → `treasury.money` (pending inbound on commit); `treasury.money` → `payroll.money`.
@@ -196,21 +237,23 @@ Play bootstrap: `ScenarioBootstrap.CreateInitialState(GameConfig)` (loads node c
 - **Design variation:** add node `design`; replace the enchant self-loop with `enchant.enchantment` → `design.enchantment` → `enchant.enchantment` (design is the sole input into enchant); keep `enchant.enchantment` → `sell.enchantment` and money edges. Mutually exclusive with testing.
 - **Preset `lab01`:** `includeTesting: true`, `includeDesign: false`; actors `intern` and `boss` (stats as configured, wages unset). Preferred assignments (weight `1` each): intern → enchant, testing; boss → payroll, sell, treasury.
 - **Actor pool:** `config/scenarios/actor-pool.json` lists eligible actor ids (not every file under `config/actors/`). Random generation: equal thirds among none / testing / design (never both); 2–4 distinct pool actors; preferred assignments (weight `1`) cover **every** graph node; multi-actor overlap on a node is allowed but sparse (more likely when actors are plentiful relative to nodes). Deterministic for a fixed seed.
-- Initial signals: `enchant.enchantment` = genesis empty block; `treasury.money` = `100`; `EnchantmentBlocks` contains genesis; `NextUnitId` = `1`; progress empty/`0`; cycles empty/`0`; payroll timer = `0`; pending money moves empty; `Tick = 0`.
+- Initial signals: `enchant.enchantment` = genesis empty block; `treasury.money` = `100`; `EnchantmentBlocks` contains genesis; `NextUnitId` = `1`; progress empty/`0`; cycles empty/`0`; payroll timer = `0`; pending money moves empty; `Tick = 0`; `TimePartitions` from committed `config/time-partitions.json`.
 
 ## Layout
 
 Under `src/MarlothStrategy.Simulation/`:
 
 - `Graph/` — structural Imp-like types
-- `Production/` — signals, catalog, `GameState`, scenario bootstrap/generation, seed compatibility, `AdvanceTick`, config DTOs/loaders, pending money moves
+- `Production/` — signals, catalog, `GameState`, scenario bootstrap/generation, seed compatibility, `AdvanceTick` / `AdvanceTicks`, config DTOs/loaders, pending money moves
+- `Time/` — nested time partition types, position/boundary queries, loader
 - `config/node-types/` — JSON behavior numerics per node type (copied to output)
 - `config/actors/` — JSON actor definitions (copied to output)
 - `config/scenarios/` — named presets (`lab01.json`) and `actor-pool.json` (copied to output)
+- `config/time-partitions.json` — nested calendar hierarchy and session `advanceUnit` (copied to output)
 
 ## Error handling
 
-Seed and tick assume a well-formed graph for v1 (programmer invariants). Malformed catalogs or missing node types are exceptional (`InvalidOperationException`). Missing or invalid node-type, actor, preset, or actor-pool JSON at seed/boot is exceptional (fail-fast with path context). Expected empty stocks, incompatible-enchantment empty ports, payday mass-quit, and empty pending queues are normal.
+Seed and tick assume a well-formed graph for v1 (programmer invariants). Malformed catalogs or missing node types are exceptional (`InvalidOperationException`). Missing or invalid node-type, actor, preset, actor-pool, or **time-partition** JSON at seed/boot is exceptional (fail-fast with path context). Expected empty stocks, incompatible-enchantment empty ports, payday mass-quit, and empty pending queues are normal.
 
 ## Related docs
 

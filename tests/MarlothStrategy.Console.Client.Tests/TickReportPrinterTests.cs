@@ -18,7 +18,7 @@ public sealed class TickReportPrinterTests
         new TestingNodeConfig(Effort: 10, FallacyReduction: 5),
         new SellNodeConfig(Effort: 10, PayoutFloor: 0),
         new TreasuryNodeConfig(Effort: 1),
-        new PayrollNodeConfig(DefaultWage: 10, Period: 5, Effort: 1),
+        new PayrollNodeConfig(Period: 5, BaseEffort: 1, PerActorEffort: 1),
         new MergeNodeConfig(Effort: 1),
         new DesignNodeConfig(Effort: 3, DesignDelta: 1, DarknessReduction: 0.9));
 
@@ -53,6 +53,7 @@ public sealed class TickReportPrinterTests
         Assert.StartsWith($"{BoxDrawing.DoubleTopLeft}", normalized);
         Assert.Contains("Marloth Strategy", text);
         Assert.Contains("Tick 0", text);
+        Assert.Contains("month 1, week 1/4, day 1/7", text);
         Assert.Contains("actors: boss, intern", text);
         Assert.Contains("enchant:", text);
         Assert.Contains("intern 1", text);
@@ -141,6 +142,21 @@ public sealed class TickReportPrinterTests
     }
 
     [Fact]
+    public void FormatCalendarLine_WeekBoundary_ShowsRolledPositions()
+    {
+        var state = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors);
+        Assert.Equal(
+            "month 1, week 1/4, day 1/7",
+            TickReportPrinter.FormatCalendarLine(state.TimePartitions, 0));
+        Assert.Equal(
+            "month 1, week 2/4, day 1/7",
+            TickReportPrinter.FormatCalendarLine(state.TimePartitions, 7));
+        Assert.Equal(
+            "month 2, week 1/4, day 1/7",
+            TickReportPrinter.FormatCalendarLine(state.TimePartitions, 28));
+    }
+
+    [Fact]
     public void FormatScreen_Tick1_MoneyShowsOwnedStockNotTransforms()
     {
         var previous = MagicAgencySeed.CreateInitialState(DefaultConfigs, DefaultActors);
@@ -149,6 +165,7 @@ public sealed class TickReportPrinterTests
         var normalized = text.Replace("\r\n", "\n");
 
         Assert.Contains("Tick 1", normalized);
+        Assert.Contains("month 1, week 1/4, day 2/7", normalized);
         Assert.Contains("actors: boss, intern", normalized);
         Assert.Contains("volume: 0 \u2192 10", normalized);
         Assert.Contains("cycles: 0 \u2192 1", normalized);

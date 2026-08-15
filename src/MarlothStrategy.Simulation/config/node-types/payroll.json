@@ -1,5 +1,5 @@
 {
-  "defaultWage": 10,
   "period": 5,
-  "effort": 1
+  "baseEffort": 1,
+  "perActorEffort": 1
 }

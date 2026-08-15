@@ -1,0 +1,8 @@
+{
+  "units": [
+    { "name": "day", "contains": 1, "of": "tick" },
+    { "name": "week", "contains": 7, "of": "day" },
+    { "name": "month", "contains": 4, "of": "week" }
+  ],
+  "advanceUnit": "week"
+}

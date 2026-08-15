@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using MarlothStrategy.Simulation.Graph;
+using MarlothStrategy.Simulation.Time;
 
 namespace MarlothStrategy.Simulation.Production;
 
@@ -16,24 +17,53 @@ public static class ScenarioBootstrap
             config,
             NodeTypeConfigLoader.LoadFromBaseDirectory(),
             ActorConfigLoader.LoadFromBaseDirectory(),
-            ActorPoolLoader.LoadFromBaseDirectory());
+            ActorPoolLoader.LoadFromBaseDirectory(),
+            TimePartitionConfigLoader.LoadFromBaseDirectory());
 
     public static GameState CreateInitialState(
         GameConfig config,
         NodeTypeConfigs nodeConfigs,
         ImmutableDictionary<ActorId, Actor> actors,
-        ImmutableArray<ActorId> actorPool)
+        ImmutableArray<ActorId> actorPool) =>
+        CreateInitialState(
+            config,
+            nodeConfigs,
+            actors,
+            actorPool,
+            TimePartitionConfigLoader.LoadFromBaseDirectory());
+
+    public static GameState CreateInitialState(
+        GameConfig config,
+        NodeTypeConfigs nodeConfigs,
+        ImmutableDictionary<ActorId, Actor> actors,
+        ImmutableArray<ActorId> actorPool,
+        TimePartitionConfig timePartitions)
     {
         ArgumentNullException.ThrowIfNull(config);
         var spec = ResolveSpec(config, actorPool);
-        return Materialize(spec, nodeConfigs, actors);
+        return Materialize(spec, nodeConfigs, actors, timePartitions);
     }
 
     public static GameState CreateFromPreset(
         string name,
         NodeTypeConfigs nodeConfigs,
         ImmutableDictionary<ActorId, Actor> actors) =>
-        Materialize(ScenarioPresetLoader.LoadFromBaseDirectory(name), nodeConfigs, actors);
+        CreateFromPreset(
+            name,
+            nodeConfigs,
+            actors,
+            TimePartitionConfigLoader.LoadFromBaseDirectory());
+
+    public static GameState CreateFromPreset(
+        string name,
+        NodeTypeConfigs nodeConfigs,
+        ImmutableDictionary<ActorId, Actor> actors,
+        TimePartitionConfig timePartitions) =>
+        Materialize(
+            ScenarioPresetLoader.LoadFromBaseDirectory(name),
+            nodeConfigs,
+            actors,
+            timePartitions);
 
     public static ScenarioSpec ResolveSpec(GameConfig config, ImmutableArray<ActorId> actorPool)
     {
@@ -50,11 +80,19 @@ public static class ScenarioBootstrap
     public static GameState Materialize(
         ScenarioSpec spec,
         NodeTypeConfigs nodeConfigs,
-        ImmutableDictionary<ActorId, Actor> actors)
+        ImmutableDictionary<ActorId, Actor> actors) =>
+        Materialize(spec, nodeConfigs, actors, TimePartitionConfigLoader.LoadFromBaseDirectory());
+
+    public static GameState Materialize(
+        ScenarioSpec spec,
+        NodeTypeConfigs nodeConfigs,
+        ImmutableDictionary<ActorId, Actor> actors,
+        TimePartitionConfig timePartitions)
     {
         ArgumentNullException.ThrowIfNull(spec);
         ArgumentNullException.ThrowIfNull(nodeConfigs);
         ArgumentNullException.ThrowIfNull(actors);
+        ArgumentNullException.ThrowIfNull(timePartitions);
 
         if (nodeConfigs.Payroll.Period <= 0)
         {
@@ -147,6 +185,7 @@ public static class ScenarioBootstrap
             ImmutableArray<PendingMoneyMove>.Empty,
             blocks,
             NextUnitId: 1,
-            Tick: 0);
+            Tick: 0,
+            timePartitions);
     }
 }
